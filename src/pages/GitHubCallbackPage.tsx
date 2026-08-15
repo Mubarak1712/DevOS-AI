@@ -6,7 +6,6 @@ import { Card } from '@/components/ui';
 import { githubService } from '@/services/github';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
-import { config } from '@/lib/config';
 
 type OAuthStatus = 'processing' | 'success' | 'error';
 
@@ -55,13 +54,6 @@ export function GitHubCallbackPage() {
       return;
     }
 
-    if (!config.github.redirectUri) {
-      setStatus('error');
-      setMessage('Missing GitHub redirect URI configuration.');
-      setStarted(true);
-      return;
-    }
-
     setStarted(true);
     setMessage('Checking authentication session...');
 
@@ -79,107 +71,26 @@ export function GitHubCallbackPage() {
           return;
         }
 
-        setMessage('Exchanging GitHub authorization code...');
+        setMessage('Exchanging authorization code and connecting account...');
         const oauthResult = await githubService.handleCallback(code, state);
 
-        if (!oauthResult?.access_token) {
-          throw new Error('GitHub access token was not returned.');
-        }
-
-        const accessToken = oauthResult.access_token;
         const githubUser = oauthResult.user ?? null;
-
-        if (!githubUser?.id) {
-          throw new Error('GitHub user profile was not returned.');
-        }
-
-        setMessage('Saving GitHub profile...');
-        const { error: userError } = await supabase
-          .from('users')
-          .upsert(
-            {
-              id: currentUser.id,
-              email: githubUser.email || currentUser.email || '',
-              name: githubUser.name || githubUser.login || currentUser.user_metadata?.full_name || currentUser.email || '',
-              avatar_url: githubUser.avatar_url || currentUser.user_metadata?.avatar_url || null,
-            },
-            { onConflict: 'id' }
-          );
-
-        if (userError) {
-          throw userError;
-        }
-
-        setMessage('Fetching your GitHub repositories...');
-        const repositories = await githubService.fetchRepositories(accessToken);
-
-        setMessage('Syncing repositories to your account...');
-        const repositoryRows = repositories.map((repo) => ({
-          user_id: currentUser.id,
-          github_id: repo.id,
-          name: repo.name,
-          full_name: repo.full_name,
-          description: repo.description,
-          html_url: repo.html_url,
-          owner_login: repo.owner?.login ?? null,
-          visibility: repo.visibility ?? (repo.private ? 'private' : 'public'),
-          default_branch: repo.default_branch ?? null,
-          stars: repo.stargazers_count ?? 0,
-          forks: repo.forks_count ?? 0,
-          open_issues: repo.open_issues_count ?? 0,
-          language: repo.language ?? null,
-          topics: repo.topics ?? [],
-          is_private: repo.private ?? false,
-          is_fork: repo.fork ?? false,
-          last_commit_at: repo.pushed_at ?? null,
-          last_activity_at: repo.updated_at ?? null,
-          has_readme: false,
-          has_license: false,
-        }));
-
-        const { error: repositoryError } = await supabase
-          .from('repositories')
-          .upsert(repositoryRows, { onConflict: 'github_id' });
-
-        if (repositoryError) {
-          throw repositoryError;
-        }
-
-        const { error: integrationError } = await supabase
-          .from('integrations')
-          .upsert(
-            [
-              {
-                user_id: currentUser.id,
-                platform: 'github',
-                name: 'GitHub',
-                connected: true,
-                connected_at: new Date().toISOString(),
-                metadata: {
-                  login: githubUser.login,
-                  avatar_url: githubUser.avatar_url,
-                  github_id: githubUser.id,
-                },
-              },
-            ],
-            { onConflict: 'user_id,platform' }
-          );
-
-        if (integrationError) {
-          throw integrationError;
-        }
+        const syncedCount = oauthResult.synced_count ?? 0;
 
         await queryClient.invalidateQueries({ queryKey: ['repositories'] });
         await queryClient.invalidateQueries({ queryKey: ['integrations'] });
+        await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
 
         setStatus('success');
-        setMessage(`Connected to GitHub as ${githubUser.login || 'your account'}.`);
+        setMessage(
+          `Connected to GitHub as @${githubUser?.login || 'developer'}. Initial sync imported ${syncedCount} repositories.`
+        );
 
         window.setTimeout(() => {
           navigate('/github');
-        }, 800);
+        }, 1000);
       } catch (error) {
-        console.error('GitHub OAuth callback failed', error);
+        console.error('GitHub OAuth callback failed:', error);
         setStatus('error');
         setMessage(getErrorMessage(error));
       }

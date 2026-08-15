@@ -1,4 +1,4 @@
-export{};
+export {};
 
 declare const Deno: {
   env: {
@@ -22,6 +22,27 @@ const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') || '';
 
 const supabase = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey);
+
+interface GitHubRepoResponse {
+  id: number;
+  name: string;
+  full_name: string;
+  description: string | null;
+  html_url: string;
+  owner?: { login?: string };
+  visibility?: string;
+  default_branch?: string;
+  stargazers_count?: number;
+  forks_count?: number;
+  open_issues_count?: number;
+  language?: string | null;
+  topics?: string[];
+  private?: boolean;
+  fork?: boolean;
+  pushed_at?: string;
+  updated_at?: string;
+  license?: unknown;
+}
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -150,46 +171,160 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const accessToken = tokenData.access_token;
+    if (!accessToken) {
+      return new Response(
+        JSON.stringify({ error: 'GitHub did not return an access token' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // 5. Fetch user info with the access token
     const userResponse = await fetch('https://api.github.com/user', {
       headers: {
-        'Authorization': `Bearer ${tokenData.access_token}`,
+        'Authorization': `Bearer ${accessToken}`,
         'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'DevOS-AI',
       },
     });
 
-    let userData: {
-      id?: number;
-      login?: string;
-      name?: string | null;
-      avatar_url?: string | null;
-      email?: string | null;
-    } | null = null;
-
-    if (userResponse.ok) {
-      const githubUser = (await userResponse.json()) as Record<string, unknown>;
-      userData = {
-        id: typeof githubUser.id === 'number' ? githubUser.id : undefined,
-        login: typeof githubUser.login === 'string' ? githubUser.login : undefined,
-        name: typeof githubUser.name === 'string' ? githubUser.name : null,
-        avatar_url: typeof githubUser.avatar_url === 'string' ? githubUser.avatar_url : null,
-        email: typeof githubUser.email === 'string' ? githubUser.email : null,
-      };
+    if (!userResponse.ok) {
+      return new Response(
+        JSON.stringify({ error: 'Failed to fetch GitHub user profile' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
+    const githubUser = (await userResponse.json()) as Record<string, unknown>;
+    const githubUserData = {
+      id: typeof githubUser.id === 'number' ? githubUser.id : undefined,
+      login: typeof githubUser.login === 'string' ? githubUser.login : undefined,
+      name: typeof githubUser.name === 'string' ? githubUser.name : null,
+      avatar_url: typeof githubUser.avatar_url === 'string' ? githubUser.avatar_url : null,
+      email: typeof githubUser.email === 'string' ? githubUser.email : null,
+    };
+
+    // 6. Update user profile in public.users if not set
+    if (githubUserData.name || githubUserData.avatar_url) {
+      await supabase
+        .from('users')
+        .update({
+          name: githubUserData.name || githubUserData.login,
+          avatar_url: githubUserData.avatar_url,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', authenticatedUserId);
+    }
+
+    // 7. Store integration and securely preserve credential server-side
+    const nowIso = new Date().toISOString();
+    const { error: integrationError } = await supabase
+      .from('integrations')
+      .upsert(
+        {
+          user_id: authenticatedUserId,
+          platform: 'github',
+          name: 'GitHub',
+          connected: true,
+          connected_at: nowIso,
+          last_sync_at: nowIso,
+          metadata: {
+            login: githubUserData.login,
+            avatar_url: githubUserData.avatar_url,
+            github_id: githubUserData.id,
+            name: githubUserData.name,
+            token: accessToken,
+            scope: tokenData.scope,
+            token_type: tokenData.token_type,
+          },
+        },
+        { onConflict: 'user_id,platform' }
+      );
+
+    if (integrationError) {
+      console.error('Failed to save integration record:', integrationError);
+      return new Response(
+        JSON.stringify({ error: 'Failed to save GitHub integration record' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // 8. Fetch initial repositories server-side
+    let initialRepos: GitHubRepoResponse[] = [];
+    try {
+      const reposResponse = await fetch(
+        'https://api.github.com/user/repos?sort=updated&per_page=100&page=1&visibility=all&affiliation=owner,collaborator',
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'User-Agent': 'DevOS-AI',
+          },
+        }
+      );
+
+      if (reposResponse.ok) {
+        initialRepos = (await reposResponse.json()) as GitHubRepoResponse[];
+      }
+    } catch (repoFetchErr) {
+      console.error('Initial repo fetch warning:', repoFetchErr);
+    }
+
+    // 9. Upsert initial repositories to database
+    if (Array.isArray(initialRepos) && initialRepos.length > 0) {
+      const repoRows = initialRepos.map((repo) => ({
+        user_id: authenticatedUserId,
+        github_id: repo.id,
+        name: repo.name,
+        full_name: repo.full_name,
+        description: repo.description || null,
+        html_url: repo.html_url,
+        owner_login: repo.owner?.login || null,
+        visibility: repo.visibility || (repo.private ? 'private' : 'public'),
+        default_branch: repo.default_branch || 'main',
+        stars: repo.stargazers_count || 0,
+        forks: repo.forks_count || 0,
+        open_issues: repo.open_issues_count || 0,
+        language: repo.language || null,
+        topics: Array.isArray(repo.topics) ? repo.topics : [],
+        is_private: repo.private ?? false,
+        is_fork: repo.fork ?? false,
+        last_commit_at: repo.pushed_at || null,
+        last_activity_at: repo.updated_at || null,
+        has_readme: false,
+        has_license: !!repo.license,
+        updated_at: nowIso,
+      }));
+
+      await supabase
+        .from('repositories')
+        .upsert(repoRows, { onConflict: 'github_id' });
+    }
+
+    // 10. Log activity
+    await supabase.from('activity_logs').insert({
+      user_id: authenticatedUserId,
+      action: 'connected_github',
+      resource_type: 'integration',
+      details: {
+        login: githubUserData.login,
+        initial_repositories_synced: initialRepos.length,
+      },
+    });
+
+    // 11. Return ONLY safe metadata to the browser (NEVER return access_token)
     return new Response(
       JSON.stringify({
-        access_token: tokenData.access_token,
-        token_type: tokenData.token_type,
-        scope: tokenData.scope,
+        success: true,
         authenticated_user_id: authenticatedUserId,
-        user: userData ? {
-          id: userData.id,
-          login: userData.login,
-          name: userData.name,
-          avatar_url: userData.avatar_url,
-          email: userData.email,
-        } : null,
+        user: {
+          id: githubUserData.id,
+          login: githubUserData.login,
+          name: githubUserData.name,
+          avatar_url: githubUserData.avatar_url,
+          email: githubUserData.email,
+        },
+        synced_count: initialRepos.length,
       }),
       { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -201,4 +336,3 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
-

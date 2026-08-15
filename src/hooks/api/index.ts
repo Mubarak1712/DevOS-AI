@@ -10,6 +10,7 @@ import {
   analyticsService,
   activityLogService,
 } from '@/services/api';
+import { githubService } from '@/services/github';
 import { fetchProviderConfigStatus } from '@/lib/config';
 
 export { useQueryClient };
@@ -97,6 +98,20 @@ export function useRepositories() {
     queryKey: ['repositories', userId],
     queryFn: () => repositoryService.getAll(userId!),
     enabled: isReady,
+  });
+}
+
+export function useSyncRepositories() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => githubService.syncRepositories(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repositories'] });
+      queryClient.invalidateQueries({ queryKey: ['integrations'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['activity'] });
+    },
   });
 }
 

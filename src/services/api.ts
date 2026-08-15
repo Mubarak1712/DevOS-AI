@@ -308,6 +308,16 @@ export const deploymentService = {
 
 export type DeploymentWithRepository = Awaited<ReturnType<typeof deploymentService.getAll>>[number];
 
+function sanitizeIntegration<T extends { metadata?: unknown }>(item: T): T {
+  if (!item || typeof item !== 'object' || !item.metadata || typeof item.metadata !== 'object') {
+    return item;
+  }
+  const meta = { ...(item.metadata as Record<string, unknown>) };
+  delete meta.token;
+  delete meta.access_token;
+  return { ...item, metadata: meta };
+}
+
 // Integration operations
 export const integrationService = {
   async getAll(userId: string) {
@@ -316,7 +326,7 @@ export const integrationService = {
       .select('*')
       .eq('user_id', userId);
     if (error) throw error;
-    return data;
+    return (data || []).map(sanitizeIntegration);
   },
 
   async getByPlatform(userId: string, platform: string) {
@@ -327,7 +337,7 @@ export const integrationService = {
       .eq('platform', platform)
       .single();
     if (error && error.code !== 'PGRST116') throw error;
-    return data;
+    return data ? sanitizeIntegration(data) : null;
   },
 
   async create(integration: {

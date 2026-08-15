@@ -1,14 +1,39 @@
 import { supabase } from '@/lib/supabase';
 import { config } from '@/lib/config';
 
+export interface GitHubCallbackResult {
+  success: boolean;
+  authenticated_user_id?: string;
+  user: {
+    id?: number;
+    login?: string;
+    name?: string | null;
+    avatar_url?: string | null;
+    email?: string | null;
+  } | null;
+  synced_count?: number;
+}
+
+export interface GitHubSyncResult {
+  success: boolean;
+  count: number;
+  synced_at: string;
+}
+
 export const githubService = {
   isConfigured(): boolean {
     return config.isGitHubClientConfigured;
   },
 
+  getRedirectUri(): string {
+    return typeof window !== 'undefined'
+      ? `${window.location.origin}/github/callback`
+      : config.github.redirectUri;
+  },
+
   initiateOAuth() {
     const clientId = config.github.clientId;
-    const redirectUri = config.github.redirectUri;
+    const redirectUri = this.getRedirectUri();
 
     if (!clientId) {
       throw new Error('GitHub Client ID not configured. Add VITE_GITHUB_CLIENT_ID to your .env file.');
@@ -22,7 +47,7 @@ export const githubService = {
     // Store state in localStorage with timestamp
     localStorage.setItem('github_oauth_state', state);
     localStorage.setItem('github_oauth_state_timestamp', Date.now().toString());
-    
+
     // Clear any previous processed code to allow reconnecting
     sessionStorage.removeItem('github_oauth_processed_code');
     localStorage.removeItem('github_oauth_processed_code');
@@ -37,10 +62,10 @@ export const githubService = {
     window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`;
   },
 
-  async handleCallback(code: string, state: string) {
+  async handleCallback(code: string, state: string): Promise<GitHubCallbackResult> {
     const storedState = localStorage.getItem('github_oauth_state');
     const stateTimestamp = localStorage.getItem('github_oauth_state_timestamp');
-    
+
     // Check if state is valid
     if (!storedState || storedState !== state) {
       localStorage.removeItem('github_oauth_state');
@@ -50,7 +75,7 @@ export const githubService = {
 
     // Check if state is too old (older than 10 minutes)
     if (stateTimestamp) {
-      const age = Date.now() - parseInt(stateTimestamp);
+      const age = Date.now() - parseInt(stateTimestamp, 10);
       if (age > 10 * 60 * 1000) {
         localStorage.removeItem('github_oauth_state');
         localStorage.removeItem('github_oauth_state_timestamp');
@@ -58,13 +83,15 @@ export const githubService = {
       }
     }
 
-    let data;
-    let error;
-
     const { data: sessionData } = await supabase.auth.getSession();
     const authHeader = sessionData?.session?.access_token
       ? { Authorization: `Bearer ${sessionData.session.access_token}` }
       : undefined;
+
+    const redirectUri = this.getRedirectUri();
+
+    let data: GitHubCallbackResult | null = null;
+    let error: { message: string; context?: { json?: () => Promise<{ error?: string }> } } | null = null;
 
     try {
       const response = await supabase.functions.invoke('github-oauth', {
@@ -74,14 +101,14 @@ export const githubService = {
         body: {
           code,
           client_id: config.github.clientId,
-          redirect_uri: config.github.redirectUri,
+          redirect_uri: redirectUri,
           state,
         },
       });
-      data = response.data;
+      data = response.data as GitHubCallbackResult;
       error = response.error;
     } catch (invokeError) {
-      console.error('STEP A ERROR: github-oauth invoke failed', invokeError);
+      console.error('github-oauth invoke failed', invokeError);
       throw invokeError instanceof Error ? invokeError : new Error('Failed to invoke github-oauth');
     }
 
@@ -90,24 +117,55 @@ export const githubService = {
       try {
         const details = await error.context?.json?.();
         if (details?.error) message = details.error;
-      } catch (parseError) {
-        console.error('STEP B ERROR: Failed to parse error context JSON', parseError);
+      } catch {
+        // Fallback to error.message
       }
       throw new Error(message);
     }
 
     if (!data) {
-      throw new Error('No response from OAuth service');
-    }
-
-    if (data.error) {
-      throw new Error(data.error);
+      throw new Error('No response from GitHub OAuth service');
     }
 
     // Clear OAuth state after successful exchange
     localStorage.removeItem('github_oauth_state');
     localStorage.removeItem('github_oauth_state_timestamp');
-    
+
+    return data;
+  },
+
+  async syncRepositories(): Promise<GitHubSyncResult> {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const authHeader = sessionData?.session?.access_token
+      ? { Authorization: `Bearer ${sessionData.session.access_token}` }
+      : undefined;
+
+    if (!authHeader) {
+      throw new Error('Please sign in before syncing repositories.');
+    }
+
+    const response = await supabase.functions.invoke('sync-repositories', {
+      headers: {
+        ...authHeader,
+      },
+    });
+
+    if (response.error) {
+      let message = response.error.message;
+      try {
+        const details = await response.error.context?.json?.();
+        if (details?.error) message = details.error;
+      } catch {
+        // Fallback to response.error.message
+      }
+      throw new Error(message);
+    }
+
+    const data = response.data as GitHubSyncResult;
+    if (!data || !data.success) {
+      throw new Error('Failed to sync repositories from GitHub.');
+    }
+
     return data;
   },
 
@@ -131,92 +189,5 @@ export const githubService = {
       .eq('platform', 'github');
 
     if (error) throw error;
-  },
-
-  async fetchRepositories(accessToken: string) {
-    const repositories: Record<string, unknown>[] = [];
-    let page = 1;
-    const perPage = 100;
-
-    while (page <= 5) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
-
-      try {
-        const response = await fetch(
-          `https://api.github.com/user/repos?sort=updated&per_page=${perPage}&page=${page}&visibility=all&affiliation=owner,collaborator`,
-          {
-            headers: {
-              Authorization: `Bearer ${accessToken}`,
-              Accept: 'application/vnd.github.mercy-preview+json',
-            },
-            signal: controller.signal,
-          }
-        );
-
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`Failed to fetch repositories: ${response.status} ${errorText}`);
-        }
-
-        const pageRepos = await response.json();
-        if (!Array.isArray(pageRepos) || pageRepos.length === 0) break;
-
-        repositories.push(...pageRepos);
-        if (pageRepos.length < perPage) break;
-        page += 1;
-      } finally {
-        clearTimeout(timeout);
-      }
-    }
-
-    return repositories as Array<{
-      id: number;
-      name: string;
-      full_name: string;
-      description: string | null;
-      html_url: string;
-      owner?: { login?: string };
-      visibility?: string;
-      default_branch?: string;
-      stargazers_count?: number;
-      forks_count?: number;
-      open_issues_count?: number;
-      language?: string | null;
-      topics?: string[];
-      private?: boolean;
-      fork?: boolean;
-      pushed_at?: string;
-      updated_at?: string;
-      license?: unknown;
-    }>;
-  },
-
-  async fetchUserInfo(accessToken: string) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    try {
-      const response = await fetch('https://api.github.com/user', {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/vnd.github.v3+json',
-        },
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch user info');
-      }
-
-      return response.json() as Promise<{
-        id: number;
-        login: string;
-        name: string | null;
-        avatar_url: string;
-      }>;
-    } finally {
-      clearTimeout(timeout);
-    }
   },
 };

@@ -43,10 +43,16 @@ export const config = {
   },
 
   get github() {
+    const configured = getEnvVar('VITE_GITHUB_REDIRECT_URI');
+    let redirectUri = `${typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173'}/github/callback`;
+    if (configured && !configured.includes('localhost:')) {
+      redirectUri = configured;
+    } else if (typeof window !== 'undefined') {
+      redirectUri = `${window.location.origin}/github/callback`;
+    }
     return {
       clientId: getEnvVar('VITE_GITHUB_CLIENT_ID') || '',
-      redirectUri:
-        getEnvVar('VITE_GITHUB_REDIRECT_URI') || `${window.location.origin}/github/callback`,
+      redirectUri,
     };
   },
 

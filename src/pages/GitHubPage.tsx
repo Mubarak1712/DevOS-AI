@@ -1,7 +1,7 @@
-﻿import { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Github, RefreshCw, AlertTriangle, CheckCircle, XCircle, ExternalLink, Unlink, Clipboard, Search } from 'lucide-react';
 import { Button, Card, EmptyState, Input, Select } from '@/components/ui';
-import { useRepositories, useIntegrations, useDisconnectIntegration, useQueryInitialLoading } from '@/hooks/api';
+import { useRepositories, useIntegrations, useDisconnectIntegration, useSyncRepositories, useQueryInitialLoading } from '@/hooks/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLogActivity } from '@/hooks/api';
 import { githubService } from '@/services/github';
@@ -10,6 +10,7 @@ import { config } from '@/lib/config';
 export function GitHubPage() {
   const { user, loading: authLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
+  const [syncSuccessMessage, setSyncSuccessMessage] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [languageFilter, setLanguageFilter] = useState('');
   const [visibilityFilter, setVisibilityFilter] = useState('');
@@ -20,9 +21,9 @@ export function GitHubPage() {
     data: repositories = [],
     isPending: reposPending,
     fetchStatus: reposFetchStatus,
-    refetch: refetchRepos,
   } = useRepositories();
   const { data: integrations = [], isPending: integrationsPending, fetchStatus: integrationsFetchStatus } = useIntegrations();
+  const syncRepositoriesMutation = useSyncRepositories();
   const disconnectIntegration = useDisconnectIntegration();
   const logActivity = useLogActivity();
 
@@ -33,21 +34,40 @@ export function GitHubPage() {
   const handleConnect = () => {
     try {
       setError(null);
+      setSyncSuccessMessage(null);
       githubService.initiateOAuth();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to initiate GitHub connection');
     }
   };
 
+  const handleSync = async () => {
+    try {
+      setError(null);
+      setSyncSuccessMessage(null);
+      const result = await syncRepositoriesMutation.mutateAsync();
+      setSyncSuccessMessage(`Successfully synchronized ${result.count} repositories with GitHub.`);
+      setTimeout(() => setSyncSuccessMessage(null), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to sync repositories from GitHub');
+    }
+  };
+
   const handleDisconnect = async () => {
     if (!user) return;
 
-    await disconnectIntegration.mutateAsync('github');
-    await logActivity.mutateAsync({
-      action: 'disconnected_github',
-      resourceType: 'integration',
-      details: { platform: 'github' },
-    });
+    try {
+      setError(null);
+      setSyncSuccessMessage(null);
+      await disconnectIntegration.mutateAsync('github');
+      await logActivity.mutateAsync({
+        action: 'disconnected_github',
+        resourceType: 'integration',
+        details: { platform: 'github' },
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to disconnect GitHub');
+    }
   };
 
   const githubIntegration = integrations.find((i) => i.platform === 'github');
@@ -139,11 +159,19 @@ export function GitHubPage() {
               </Button>
             ) : (
               <>
-                <Button variant="secondary" onClick={() => refetchRepos()}>
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Refresh
+                <Button
+                  variant="secondary"
+                  onClick={handleSync}
+                  disabled={syncRepositoriesMutation.isPending}
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${syncRepositoriesMutation.isPending ? 'animate-spin' : ''}`} />
+                  {syncRepositoriesMutation.isPending ? 'Syncing...' : 'Sync Repositories'}
                 </Button>
-                <Button variant="secondary" onClick={handleDisconnect}>
+                <Button
+                  variant="secondary"
+                  onClick={handleDisconnect}
+                  disabled={disconnectIntegration.isPending}
+                >
                   <Unlink className="w-4 h-4 mr-2" />
                   Disconnect
                 </Button>
@@ -153,9 +181,17 @@ export function GitHubPage() {
         </div>
       </div>
 
+      {syncSuccessMessage && (
+        <Card className="p-4 border-emerald-200 bg-emerald-50 text-emerald-800 flex items-center gap-3">
+          <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+          <p className="text-sm font-medium">{syncSuccessMessage}</p>
+        </Card>
+      )}
+
       {error && (
-        <Card className="p-4 border-rose-200 bg-rose-50 text-rose-700">
-          <p className="text-rose-700">{error}</p>
+        <Card className="p-4 border-rose-200 bg-rose-50 text-rose-700 flex items-center gap-3">
+          <XCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
+          <p className="text-sm font-medium">{error}</p>
         </Card>
       )}
 
