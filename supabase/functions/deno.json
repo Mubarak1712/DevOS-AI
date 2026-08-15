@@ -1,0 +1,21 @@
+﻿{
+  "importMap": "./import_map.json",
+  "compilerOptions": {
+    "lib": ["deno.window"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true
+  },
+  "fmt": {
+    "files": {
+      "include": ["./**/*.{ts,tsx}"]
+    }
+  },
+  "lint": {
+    "files": {
+      "include": ["./**/*.{ts,tsx}"]
+    }
+  }
+}
