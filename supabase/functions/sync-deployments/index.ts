@@ -215,13 +215,59 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const body = (await req.json()) as { userId?: string; provider?: string };
-    const { userId, provider } = body;
-
-    if (!userId || !provider) {
+    // 1. Authenticate incoming request via Supabase Auth
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return new Response(
-        JSON.stringify({ error: 'userId and provider are required' }),
+        JSON.stringify({ error: 'Unauthorized: Missing or invalid Authorization header' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (!token) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized: Empty bearer token' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Verify token server-side using Supabase Auth
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized: Invalid or expired session' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const authenticatedUserId = user.id;
+
+    // 2. Parse and validate request body
+    let body: { userId?: string; provider?: string } = {};
+    try {
+      body = (await req.json()) as { userId?: string; provider?: string };
+    } catch {
+      return new Response(
+        JSON.stringify({ error: 'Invalid JSON request body' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const { provider } = body;
+
+    if (!provider) {
+      return new Response(
+        JSON.stringify({ error: 'provider is required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Security check: If client supplied a different userId in body, reject or enforce authenticatedUserId
+    if (body.userId && body.userId !== authenticatedUserId) {
+      return new Response(
+        JSON.stringify({ error: 'Forbidden: Cannot sync deployments for another user' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
@@ -292,11 +338,11 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // Mark integration connected even when provider returns zero deployments
+    // Mark integration connected even when provider returns zero deployments - strictly associated with authenticated user
     const { data: existingIntegration } = await supabase
       .from('integrations')
       .select('id')
-      .eq('user_id', userId)
+      .eq('user_id', authenticatedUserId)
       .eq('platform', provider)
       .maybeSingle();
 
@@ -310,7 +356,7 @@ Deno.serve(async (req: Request) => {
         .eq('id', existingIntegration.id);
     } else {
       await supabase.from('integrations').insert({
-        user_id: userId,
+        user_id: authenticatedUserId,
         platform: provider,
         name: provider.charAt(0).toUpperCase() + provider.slice(1),
         connected: true,
@@ -319,12 +365,12 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Upsert deployments to database
+    // Upsert deployments to database associated with authenticated user
     for (const deployment of deployments) {
       const { data: existing } = await supabase
         .from('deployments')
         .select('id')
-        .eq('user_id', userId)
+        .eq('user_id', authenticatedUserId)
         .eq('url', deployment.url)
         .maybeSingle();
 
@@ -341,7 +387,7 @@ Deno.serve(async (req: Request) => {
           .eq('id', existing.id);
       } else if (deployment.url) {
         await supabase.from('deployments').insert({
-          user_id: userId,
+          user_id: authenticatedUserId,
           platform: deployment.platform || provider,
           name: deployment.name,
           url: deployment.url,
@@ -352,9 +398,9 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Log activity
+    // Log activity for authenticated user
     await supabase.from('activity_logs').insert({
-      user_id: userId,
+      user_id: authenticatedUserId,
       action: 'synced_deployments',
       resource_type: 'integration',
       details: { provider, count: deployments.length },

@@ -75,6 +75,7 @@ export const githubService = {
           code,
           client_id: config.github.clientId,
           redirect_uri: config.github.redirectUri,
+          state,
         },
       });
       data = response.data;
