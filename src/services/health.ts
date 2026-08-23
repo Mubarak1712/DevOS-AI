@@ -1,3 +1,5 @@
+import { supabase } from '@/lib/supabase';
+
 // Deployment Health Monitoring Service
 // Checks status codes, SSL certificates, response times, and availability
 
@@ -20,12 +22,31 @@ export interface DeploymentHealthScore {
   issues: string[];
 }
 
-// Check URL health by making a request
-export async function checkUrlHealth(url: string): Promise<HealthCheckResult> {
+// Check URL health by making an authoritative server-side request (bypassing CORS)
+export async function checkUrlHealth(url: string, platform?: string, deploymentId?: string): Promise<HealthCheckResult> {
   const startTime = Date.now();
   let checkUrl = url.trim();
   if (!/^https?:\/\//i.test(checkUrl)) {
     checkUrl = 'https://' + checkUrl;
+  }
+
+  // Attempt server-side check via Edge Function
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (sessionData?.session?.access_token) {
+      const response = await supabase.functions.invoke('check-deployment-health', {
+        headers: {
+          Authorization: `Bearer ${sessionData.session.access_token}`,
+        },
+        body: { url: checkUrl, platform, deploymentId },
+      });
+
+      if (response.data && !response.error) {
+        return response.data as HealthCheckResult;
+      }
+    }
+  } catch (serverCheckErr) {
+    console.warn('Server-side health check fallback:', serverCheckErr);
   }
 
   const result: HealthCheckResult = {
@@ -35,13 +56,12 @@ export async function checkUrlHealth(url: string): Promise<HealthCheckResult> {
   };
 
   try {
-    // Use fetch with AbortController for timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    const response = await fetch(url, {
-      method: 'HEAD',
-      mode: 'no-cors', // Required for cross-origin requests
+    const response = await fetch(checkUrl, {
+      method: 'GET',
+      mode: 'no-cors',
       signal: controller.signal,
     });
 
@@ -49,8 +69,8 @@ export async function checkUrlHealth(url: string): Promise<HealthCheckResult> {
 
     result.responseTimeMs = Date.now() - startTime;
     result.statusCode = response.type === 'opaque' ? 200 : response.status;
+    result.sslValid = checkUrl.startsWith('https://');
 
-    // For no-cors requests, we can't read the status, but if no error, assume OK
     if (response.type === 'opaque' || (response.status >= 200 && response.status < 400)) {
       result.status = 'live';
     } else if (response.status >= 500) {
@@ -60,21 +80,16 @@ export async function checkUrlHealth(url: string): Promise<HealthCheckResult> {
       result.status = 'error';
       result.errorMessage = `Client error: ${response.status}`;
     }
-
   } catch (error: unknown) {
     result.responseTimeMs = Date.now() - startTime;
     const err = error as { name?: string; message?: string };
 
     if (err.name === 'AbortError') {
-      result.status = 'error';
-      result.errorMessage = 'Request timed out (30s)';
-    } else if (err.message?.includes('Failed to fetch')) {
-      // Could be CORS, offline, or DNS error
       result.status = 'offline';
-      result.errorMessage = 'Unable to reach the deployment';
+      result.errorMessage = 'Request timed out (15s)';
     } else {
-      result.status = 'error';
-      result.errorMessage = err.message || 'Unknown error';
+      result.status = 'offline';
+      result.errorMessage = err.message || 'Unable to connect to deployment';
     }
   }
 

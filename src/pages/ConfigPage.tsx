@@ -315,16 +315,15 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 VITE_GITHUB_CLIENT_ID=your_github_client_id
 
 # Server-side secrets (configured in Supabase Edge Functions)
-# These are set automatically from your .env file
 GITHUB_CLIENT_SECRET=your_github_client_secret
-VERCEL_TOKEN=your_vercel_token
-NETLIFY_TOKEN=your_netlify_token
-RENDER_API_KEY=your_render_api_key
-RAILWAY_TOKEN=your_railway_token`}
+GROQ_API_KEY=your_groq_api_key
+
+# Note: Deployment provider tokens (Vercel, Netlify, Render, Railway)
+# are connected individually by each user under the Integrations tab.`}
           </pre>
           <p className="mt-3">
             <strong>Note:</strong> Variables prefixed with <code>VITE_</code> are exposed to the browser.
-            Secrets without this prefix are only accessible server-side via Edge Functions.
+            Global secrets without this prefix are only accessible server-side via Edge Functions, while deployment provider credentials are securely managed per authenticated user.
           </p>
         </div>
       </Card>

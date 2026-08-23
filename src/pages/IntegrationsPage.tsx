@@ -1,30 +1,31 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { CheckCircle, ExternalLink, Unlink, Plus, RefreshCw, AlertTriangle, Github } from 'lucide-react';
-import { Button, Card, Modal } from '@/components/ui';
+import { CheckCircle, ExternalLink, Unlink, Plus, RefreshCw, AlertTriangle, Github, Key, ShieldCheck, Lock } from 'lucide-react';
+import { Button, Card, Modal, Input } from '@/components/ui';
 import {
   useIntegrations,
   useRepositories,
   useDisconnectIntegration,
-  useQueryClient,
   useDeployments,
   useLogActivity,
-  useProviderConfigs,
+  useConnectProvider,
+  useSyncDeployments,
   useQueryInitialLoading,
 } from '@/hooks/api';
 import { PageHeader } from '@/components/design/PageHeader';
 import { useAuth } from '@/contexts/AuthContext';
 import { config } from '@/lib/config';
-import { supabase } from '@/lib/supabase';
-import { integrationService } from '@/services/api';
 import { githubService } from '@/services/github';
 
 interface ProviderConfig {
   id: string;
   name: string;
   description: string;
+  tokenName: string;
+  tokenPlaceholder: string;
   docsUrl: string;
+  tokenHelpUrl: string;
   icon: React.ReactNode;
 }
 
@@ -32,8 +33,11 @@ const deploymentProviders: ProviderConfig[] = [
   {
     id: 'vercel',
     name: 'Vercel',
-    description: 'Deploy frontend projects and serverless functions.',
+    description: 'Frontend projects, Edge Middleware, and serverless functions.',
+    tokenName: 'Personal Access Token',
+    tokenPlaceholder: 'vercel_pat_...',
     docsUrl: 'https://vercel.com/docs/rest-api',
+    tokenHelpUrl: 'https://vercel.com/account/tokens',
     icon: (
       <svg viewBox="0 0 24 24" className="w-6 h-6 text-slate-900" fill="currentColor">
         <path d="M24 22.525H0L12 3zm-12-3.5" />
@@ -43,28 +47,37 @@ const deploymentProviders: ProviderConfig[] = [
   {
     id: 'netlify',
     name: 'Netlify',
-    description: 'Static sites and serverless functions.',
+    description: 'Static sites, continuous deployment, and serverless functions.',
+    tokenName: 'Personal Access Token',
+    tokenPlaceholder: 'nfp_...',
     docsUrl: 'https://docs.netlify.com/api/get-started/',
+    tokenHelpUrl: 'https://app.netlify.com/user/applications#personal-access-tokens',
     icon: <span className="text-lg font-bold text-slate-900">N</span>,
   },
   {
     id: 'render',
     name: 'Render',
-    description: 'Web services, databases, and background jobs.',
+    description: 'Cloud web services, background workers, and databases.',
+    tokenName: 'API Key',
+    tokenPlaceholder: 'rnd_...',
     docsUrl: 'https://render.com/docs/api',
+    tokenHelpUrl: 'https://dashboard.render.com/u/settings#api-keys',
     icon: <span className="text-lg font-bold text-slate-900">R</span>,
   },
   {
     id: 'railway',
     name: 'Railway',
-    description: 'Deploy code from GitHub in seconds.',
+    description: 'Instant infrastructure, databases, and microservices.',
+    tokenName: 'API Token',
+    tokenPlaceholder: 'railway_...',
     docsUrl: 'https://docs.railway.app/',
+    tokenHelpUrl: 'https://railway.app/account/tokens',
     icon: <span className="text-lg font-bold text-slate-900">RW</span>,
   },
 ];
 
 function isIntegrationConnected(
-  integrations: { platform: string; connected: boolean }[],
+  integrations: Array<{ platform: string; connected: boolean | null }>,
   platform: string
 ) {
   return integrations.some((i) => i.platform === platform && i.connected === true);
@@ -72,10 +85,11 @@ function isIntegrationConnected(
 
 export function IntegrationsPage() {
   const { user, loading: authLoading } = useAuth();
-  const queryClient = useQueryClient();
   const [selectedProvider, setSelectedProvider] = useState<ProviderConfig | null>(null);
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
+  const [tokenInput, setTokenInput] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
   const [syncingProvider, setSyncingProvider] = useState<string | null>(null);
   const [syncResults, setSyncResults] = useState<Record<string, { count: number; error?: string }>>({});
 
@@ -87,7 +101,9 @@ export function IntegrationsPage() {
   } = useIntegrations();
   const { data: repositories = [] } = useRepositories();
   const { data: deployments = [] } = useDeployments();
-  const { data: providerConfigs = [] } = useProviderConfigs();
+
+  const connectProviderMutation = useConnectProvider();
+  const syncDeploymentsMutation = useSyncDeployments();
   const disconnectIntegration = useDisconnectIntegration();
   const logActivity = useLogActivity();
 
@@ -99,22 +115,19 @@ export function IntegrationsPage() {
 
   const githubConnected = isIntegrationConnected(integrations, 'github');
   const connectedCount = integrations.filter((i) => i.connected === true).length;
-  const configuredCount = providerConfigs.filter((p) => p.configured).length;
   const deploymentCount = deployments.length;
   const repositoryCount = repositories.length;
 
   const getIntegration = (providerId: string) =>
     integrations.find((i) => i.platform === providerId);
 
-  const isProviderConfigured = (providerId: string): boolean =>
-    providerConfigs.find((p) => p.provider === providerId)?.configured ?? false;
-
   const providerDeployments = (providerId: string) =>
     deployments.filter((d) => d.platform === providerId).length;
 
-  const handleConnect = (provider: ProviderConfig) => {
+  const handleOpenConnectModal = (provider: ProviderConfig) => {
     setSelectedProvider(provider);
-    setError(null);
+    setTokenInput('');
+    setConnectError(null);
     setIsConnectModalOpen(true);
   };
 
@@ -129,54 +142,58 @@ export function IntegrationsPage() {
 
   const handleGitHubDisconnect = async () => {
     if (!user) return;
-    if (!confirm('Disconnect GitHub? Your synced repositories will remain until you reconnect.')) return;
-    await disconnectIntegration.mutateAsync('github');
-    await logActivity.mutateAsync({
-      action: 'disconnected_github',
-      resourceType: 'integration',
-      details: { platform: 'github' },
-    });
+    if (!confirm('Disconnect GitHub? Your synced repositories will remain in DevOS AI until you choose to remove them.')) return;
+    try {
+      await disconnectIntegration.mutateAsync('github');
+      await logActivity.mutateAsync({
+        action: 'disconnected_github',
+        resourceType: 'integration',
+        details: { platform: 'github' },
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to disconnect GitHub');
+    }
   };
 
-  const syncDeployments = async (providerId: string) => {
+  const handleConnectSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProvider || !tokenInput.trim()) {
+      setConnectError('Please enter a valid token.');
+      return;
+    }
+
+    setConnectError(null);
+
+    try {
+      await connectProviderMutation.mutateAsync({
+        provider: selectedProvider.id,
+        token: tokenInput.trim(),
+      });
+
+      setIsConnectModalOpen(false);
+      setTokenInput('');
+
+      // Auto-trigger sync right after connecting
+      await handleSync(selectedProvider.id);
+    } catch (err) {
+      setConnectError(err instanceof Error ? err.message : 'Failed to connect provider. Please check your credentials.');
+    }
+  };
+
+  const handleSync = async (providerId: string) => {
     if (!user) return;
 
     setSyncingProvider(providerId);
     setError(null);
 
     try {
-      const { data, error: syncError } = await supabase.functions.invoke('sync-deployments', {
-        body: { userId: user.id, provider: providerId },
-      });
-
-      if (syncError) throw syncError;
-      if (data?.error) throw new Error(data.error);
-
-      await integrationService.createOrUpdate({
-        user_id: user.id,
-        platform: providerId,
-        name: providerId.charAt(0).toUpperCase() + providerId.slice(1),
-        connected: true,
-        connected_at: new Date().toISOString(),
-      });
-
+      const result = await syncDeploymentsMutation.mutateAsync(providerId);
       setSyncResults((prev) => ({
         ...prev,
-        [providerId]: { count: data?.count ?? 0 },
+        [providerId]: { count: result.count },
       }));
-
-      await logActivity.mutateAsync({
-        action: 'synced_deployments',
-        resourceType: 'integration',
-        details: { platform: providerId, count: data?.count ?? 0 },
-      });
-
-      await queryClient.invalidateQueries({ queryKey: ['deployments'] });
-      await queryClient.invalidateQueries({ queryKey: ['integrations'] });
-      await queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
-      refetchIntegrations();
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Failed to sync';
+      const errorMsg = err instanceof Error ? err.message : 'Failed to sync deployments';
       setSyncResults((prev) => ({
         ...prev,
         [providerId]: { count: 0, error: errorMsg },
@@ -187,21 +204,25 @@ export function IntegrationsPage() {
     }
   };
 
-  const handleConfirmConnect = async () => {
-    if (!selectedProvider || !user) return;
-    setIsConnectModalOpen(false);
-    await syncDeployments(selectedProvider.id);
-  };
-
   const handleDisconnect = async (providerId: string) => {
     if (!user) return;
-    if (!confirm('Are you sure you want to disconnect this integration?')) return;
-    await disconnectIntegration.mutateAsync(providerId);
-    await logActivity.mutateAsync({
-      action: 'disconnected_integration',
-      resourceType: 'integration',
-      details: { platform: providerId },
-    });
+    if (!confirm(`Are you sure you want to disconnect ${providerId.charAt(0).toUpperCase() + providerId.slice(1)}? Your credentials will be securely removed from the server.`)) return;
+
+    try {
+      await disconnectIntegration.mutateAsync(providerId);
+      await logActivity.mutateAsync({
+        action: 'disconnected_integration',
+        resourceType: 'integration',
+        details: { platform: providerId },
+      });
+      setSyncResults((prev) => {
+        const next = { ...prev };
+        delete next[providerId];
+        return next;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to disconnect provider');
+    }
   };
 
   return (
@@ -209,7 +230,7 @@ export function IntegrationsPage() {
       <PageHeader
         eyebrow="Connections"
         title="Integrations"
-        description="A polished hub for all connected GitHub and deployment platforms."
+        description="Connect your personal GitHub and deployment provider accounts to track real infrastructure across all your projects."
         actions={
           <Button variant="secondary" onClick={() => refetchIntegrations()}>
             <RefreshCw className="w-4 h-4 mr-2" />
@@ -218,16 +239,11 @@ export function IntegrationsPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-3">
         <Card className="p-5 border border-slate-200 shadow-sm">
           <p className="text-sm text-slate-500">Connected</p>
           <p className="text-3xl font-bold text-slate-900">{connectedCount}</p>
           <p className="text-xs text-slate-500 mt-2">Active integrations</p>
-        </Card>
-        <Card className="p-5 border border-slate-200 shadow-sm">
-          <p className="text-sm text-slate-500">Configured</p>
-          <p className="text-3xl font-bold text-slate-900">{configuredCount}</p>
-          <p className="text-xs text-slate-500 mt-2">Provider tokens detected</p>
         </Card>
         <Card className="p-5 border border-slate-200 shadow-sm">
           <p className="text-sm text-slate-500">Deployments</p>
@@ -237,53 +253,55 @@ export function IntegrationsPage() {
         <Card className="p-5 border border-slate-200 shadow-sm">
           <p className="text-sm text-slate-500">Repositories</p>
           <p className="text-3xl font-bold text-slate-900">{repositoryCount}</p>
-          <p className="text-xs text-slate-500 mt-2">Synced repos</p>
+          <p className="text-xs text-slate-500 mt-2">Synced GitHub repos</p>
         </Card>
       </div>
 
       {error && (
         <Card className="p-4 bg-rose-50 border border-rose-200 text-rose-700">
           <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-rose-600" />
+            <AlertTriangle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
             <p className="text-sm text-rose-700">{error}</p>
           </div>
         </Card>
       )}
 
+      {/* Source Control Section */}
       <section className="space-y-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">Source control</h2>
-              <p className="text-sm text-slate-500">GitHub sync and repository metadata from your connected integration.</p>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              {githubConnected ? (
-                <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                  <CheckCircle className="w-4 h-4 text-emerald-700" />
-                  GitHub connected
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                  <AlertTriangle className="w-4 h-4 text-amber-700" />
-                  Not connected
-                </span>
-              )}
-            </div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Source control</h2>
+            <p className="text-sm text-slate-500">GitHub sync and repository metadata from your connected personal account.</p>
           </div>
+          <div className="flex flex-wrap gap-3">
+            {githubConnected ? (
+              <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-2 text-sm text-emerald-700 font-medium">
+                <CheckCircle className="w-4 h-4 text-emerald-700" />
+                GitHub connected
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-2 text-sm text-amber-700 font-medium">
+                <AlertTriangle className="w-4 h-4 text-amber-700" />
+                Not connected
+              </span>
+            )}
+          </div>
+        </div>
 
-        <Card className={`p-6 border border-slate-200 shadow-sm`}>
+        <Card className="p-6 border border-slate-200 shadow-sm bg-white">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start gap-4">
-              <div className="w-16 h-16 rounded-3xl bg-slate-100 flex items-center justify-center text-slate-900 text-2xl">
+              <div className="w-16 h-16 rounded-3xl bg-slate-100 flex items-center justify-center text-slate-900 text-2xl flex-shrink-0">
                 <Github className="w-7 h-7" />
               </div>
               <div>
                 <h3 className="text-xl font-semibold text-slate-900">GitHub</h3>
                 <p className="text-sm text-slate-500 mt-1">
-                  Sync your repositories, watch activity, and link commits to deployments.
+                  Sync your repositories, watch commit activity, and link repositories to deployment environments.
                 </p>
                 {githubConnected && (
-                  <p className="text-sm font-medium text-emerald-700 mt-3">
+                  <p className="text-sm font-medium text-emerald-700 mt-3 flex items-center gap-1.5">
+                    <CheckCircle className="w-4 h-4" />
                     {repositoryCount} synced {repositoryCount === 1 ? 'repository' : 'repositories'}
                   </p>
                 )}
@@ -319,19 +337,23 @@ export function IntegrationsPage() {
         </Card>
       </section>
 
+      {/* Deployment Platforms Section */}
       <section className="space-y-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Deployment platforms</h2>
-            <p className="text-sm text-slate-500">Connected platforms and sync status for your deployment providers.</p>
+            <p className="text-sm text-slate-500">Connect your personal deployment provider accounts. Tokens are validated and stored strictly on the server.</p>
           </div>
-          <div className="text-sm text-slate-500">Sync updates reflected in database-backed deployments.</div>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>Isolated per-user credentials</span>
+          </div>
         </div>
 
         {integrationsLoading ? (
           <div className="grid gap-6 md:grid-cols-2">
             {[1, 2, 3, 4].map((index) => (
-              <Card key={index} className="p-6 animate-pulse" />
+              <Card key={index} className="p-6 animate-pulse bg-slate-50 h-48" />
             ))}
           </div>
         ) : (
@@ -339,9 +361,10 @@ export function IntegrationsPage() {
             {deploymentProviders.map((provider, index) => {
               const integration = getIntegration(provider.id);
               const isConnected = integration?.connected === true;
-              const isConfigured = isProviderConfigured(provider.id);
               const syncInProgress = syncingProvider === provider.id;
               const syncResult = syncResults[provider.id];
+              const metadata = (integration?.metadata as Record<string, unknown>) || {};
+              const accountName = (metadata.account_name || metadata.username || metadata.name) as string | undefined;
 
               return (
                 <motion.div
@@ -350,96 +373,92 @@ export function IntegrationsPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.05 }}
                 >
-                  <Card className="p-6 bg-white border border-slate-200 shadow-sm">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 rounded-3xl bg-slate-100 flex items-center justify-center text-slate-900 shadow-sm">
-                          {provider.icon}
+                  <Card className="p-6 bg-white border border-slate-200 shadow-sm flex flex-col justify-between h-full">
+                    <div>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-4">
+                          <div className="w-14 h-14 rounded-3xl bg-slate-100 flex items-center justify-center text-slate-900 shadow-sm flex-shrink-0">
+                            {provider.icon}
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-slate-900">{provider.name}</h3>
+                            <p className="text-sm text-slate-500 mt-1">{provider.description}</p>
+                          </div>
                         </div>
-                        <div>
-                          <h3 className="font-semibold text-slate-900">{provider.name}</h3>
-                          <p className="text-sm text-slate-500 mt-1">{provider.description}</p>
+                        <div className="flex flex-col items-end gap-1">
+                          {isConnected ? (
+                            <span className="flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full font-semibold">
+                              <CheckCircle className="w-3.5 h-3.5" />
+                              Connected
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">
+                              Not connected
+                            </span>
+                          )}
                         </div>
                       </div>
-                      <div className="flex flex-col items-end gap-2">
-                        {isConfigured && (
-                          <span className="text-xs text-cyan-800 bg-cyan-100 px-2.5 py-1 rounded-full">Token ready</span>
-                        )}
-                        {isConnected && (
-                          <span className="flex items-center gap-1 text-xs text-success-700 font-semibold">
-                            <CheckCircle className="w-3.5 h-3.5" />
-                            Connected
-                          </span>
-                        )}
-                      </div>
+
+                      {isConnected && (
+                        <div className="mt-5 rounded-2xl bg-slate-50 border border-slate-200 p-4 text-sm text-slate-600">
+                          {accountName && (
+                            <div className="flex items-center justify-between text-xs text-slate-500 mb-2 pb-2 border-b border-slate-200">
+                              <span>Account:</span>
+                              <span className="font-medium text-slate-800">@{String(accountName)}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between">
+                            <span>Deployments tracked</span>
+                            <span className="font-semibold text-slate-900">{providerDeployments(provider.id)}</span>
+                          </div>
+                          {syncResult && (
+                            <p className={`mt-2 text-xs ${syncResult.error ? 'text-rose-600' : 'text-emerald-700'}`}>
+                              {syncResult.error
+                                ? `Sync error: ${syncResult.error}`
+                                : `Last sync: ${syncResult.count} deployment${syncResult.count === 1 ? '' : 's'} imported`}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
 
-                    {(isConnected || providerDeployments(provider.id) > 0) && (
-                      <div className="mt-5 rounded-3xl bg-slate-50 border border-slate-200 p-4 text-sm text-slate-600">
-                        <div className="flex items-center justify-between">
-                          <span>Deployments tracked</span>
-                          <span className="font-semibold text-slate-900">{providerDeployments(provider.id)}</span>
-                        </div>
-                        {syncResult && (
-                          <p className={`mt-2 ${syncResult.error ? 'text-rose-600' : 'text-emerald-700'}`}>
-                            {syncResult.error
-                              ? `Sync error: ${syncResult.error}`
-                              : `Last sync: ${syncResult.count} deployment${syncResult.count === 1 ? '' : 's'}`}
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="mt-5 flex flex-wrap items-center gap-3">
-                      {isConfigured ? (
+                    <div className="mt-6 flex flex-wrap items-center gap-3 pt-4 border-t border-slate-100">
+                      {isConnected ? (
                         <>
                           <Button
-                            variant={isConnected ? 'secondary' : 'primary'}
+                            variant="secondary"
                             size="sm"
-                            onClick={() => syncDeployments(provider.id)}
+                            onClick={() => handleSync(provider.id)}
                             isLoading={syncInProgress}
                           >
-                            <RefreshCw className="w-4 h-4 mr-2" />
-                            {isConnected ? 'Sync' : 'Connect & Sync'}
+                            <RefreshCw className={`w-4 h-4 mr-2 ${syncInProgress ? 'animate-spin' : ''}`} />
+                            {syncInProgress ? 'Syncing...' : 'Sync Deployments'}
                           </Button>
-                          <a
-                            href={provider.docsUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-violet-600 hover:underline inline-flex items-center gap-1"
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDisconnect(provider.id)}
+                            className="text-error-600"
                           >
-                            Docs <ExternalLink className="w-3 h-3" />
-                          </a>
+                            <Unlink className="w-4 h-4 mr-2" />
+                            Disconnect
+                          </Button>
                         </>
                       ) : (
-                        <>
-                          <Button size="sm" onClick={() => handleConnect(provider)}>
-                            <Plus className="w-4 h-4 mr-2" />
-                            Connect
-                          </Button>
-                          <a
-                            href={provider.docsUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-violet-600 hover:underline inline-flex items-center gap-1"
-                          >
-                            Docs <ExternalLink className="w-3 h-3" />
-                          </a>
-                        </>
-                      )}
-                      {isConnected && (
-                        <Button variant="ghost" size="sm" onClick={() => handleDisconnect(provider.id)} className="text-error-600">
-                          <Unlink className="w-4 h-4 mr-2" />
-                          Disconnect
+                        <Button size="sm" onClick={() => handleOpenConnectModal(provider)}>
+                          <Plus className="w-4 h-4 mr-2" />
+                          Connect {provider.name}
                         </Button>
                       )}
+                      <a
+                        href={provider.docsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-slate-500 hover:text-slate-800 inline-flex items-center gap-1 ml-auto"
+                      >
+                        API Docs <ExternalLink className="w-3 h-3" />
+                      </a>
                     </div>
-
-                    {!isConfigured && (
-                      <p className="mt-4 text-xs text-slate-500 rounded-2xl bg-slate-50 border border-slate-200 p-3">
-                        Add <code className="bg-slate-100 px-1 rounded text-xs text-slate-700">{provider.id.toUpperCase()}_TOKEN</code> to Edge Function secrets and then sync.
-                      </p>
-                    )}
                   </Card>
                 </motion.div>
               );
@@ -448,40 +467,84 @@ export function IntegrationsPage() {
         )}
       </section>
 
+      {/* Secure Provider Connect Modal */}
       <Modal
         isOpen={isConnectModalOpen}
-        onClose={() => setIsConnectModalOpen(false)}
+        onClose={() => {
+          if (!connectProviderMutation.isPending) {
+            setIsConnectModalOpen(false);
+            setTokenInput('');
+            setConnectError(null);
+          }
+        }}
         title={`Connect ${selectedProvider?.name ?? ''}`}
-        description={selectedProvider ? `Add your ${selectedProvider.name} API token to server environment variables, then sync.` : ''}
+        description={`Provide your ${selectedProvider?.name} ${selectedProvider?.tokenName || 'API token'} to synchronize your deployments.`}
         size="md"
       >
         {selectedProvider && (
-          <div className="space-y-4">
-            <div className="rounded-3xl bg-slate-50 border border-slate-200 p-4">
-              <code className="block rounded-2xl bg-white p-3 text-sm font-mono text-slate-700">
-                {selectedProvider.id.toUpperCase()}_TOKEN=your_api_token
-              </code>
+          <form onSubmit={handleConnectSubmit} className="space-y-5">
+            <div className="rounded-2xl bg-amber-50 border border-amber-200 p-4 text-xs text-amber-900 flex items-start gap-3">
+              <Lock className="w-4 h-4 text-amber-700 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold text-amber-900">Server-Side Security</p>
+                <p className="mt-0.5 text-amber-800">
+                  Your token is validated directly against {selectedProvider.name} and stored securely server-side with Row-Level Security. DevOS AI never exposes your token to the browser.
+                </p>
+              </div>
             </div>
-            {isProviderConfigured(selectedProvider.id) ? (
-              <p className="text-sm text-success-700 flex items-center gap-2">
-                <CheckCircle className="w-4 h-4" />
-                Token configured — click Sync to import deployments.
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5 flex items-center justify-between">
+                <span>{selectedProvider.name} {selectedProvider.tokenName}</span>
+                <a
+                  href={selectedProvider.tokenHelpUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-violet-600 hover:underline inline-flex items-center gap-1"
+                >
+                  Generate token <ExternalLink className="w-3 h-3" />
+                </a>
+              </label>
+              <Input
+                type="password"
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                placeholder={selectedProvider.tokenPlaceholder}
+                autoFocus
+                disabled={connectProviderMutation.isPending}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-slate-500 mt-1.5">
+                Paste your personal token here. Read-only permissions for deployments/services are recommended.
               </p>
-            ) : (
-              <p className="text-sm text-warning-700 flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4" />
-                No server token detected yet.
-              </p>
+            </div>
+
+            {connectError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                <span>{connectError}</span>
+              </div>
             )}
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Button variant="secondary" className="flex-1" onClick={() => setIsConnectModalOpen(false)}>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setIsConnectModalOpen(false)}
+                disabled={connectProviderMutation.isPending}
+              >
                 Cancel
               </Button>
-              <Button className="flex-1" onClick={handleConfirmConnect} isLoading={syncingProvider === selectedProvider.id}>
-                {isProviderConfigured(selectedProvider.id) ? 'Sync Now' : 'Check & Sync'}
+              <Button
+                type="submit"
+                isLoading={connectProviderMutation.isPending}
+                disabled={!tokenInput.trim() || connectProviderMutation.isPending}
+              >
+                <Key className="w-4 h-4 mr-2" />
+                {connectProviderMutation.isPending ? 'Verifying...' : `Verify & Connect ${selectedProvider.name}`}
               </Button>
             </div>
-          </div>
+          </form>
         )}
       </Modal>
     </div>

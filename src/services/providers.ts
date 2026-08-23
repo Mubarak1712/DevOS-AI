@@ -1,3 +1,5 @@
+import { supabase } from '@/lib/supabase';
+
 // Deployment Provider Services
 // These services interact with deployment platform APIs to fetch real deployment data
 
@@ -23,6 +25,102 @@ export interface ProviderDeployment {
   branch?: string;
   commitSha?: string;
 }
+
+export interface ProviderConnectResult {
+  success: boolean;
+  provider: string;
+  account: {
+    name?: string;
+    username?: string;
+    email?: string;
+    id?: string;
+  };
+  connected_at: string;
+}
+
+export interface ProviderSyncResult {
+  success: boolean;
+  provider: string;
+  count: number;
+  synced_at: string;
+  deployments?: Array<{
+    name: string;
+    url: string;
+    status: string;
+    environment: string;
+    last_deployed_at?: string;
+  }>;
+}
+
+export const providerService = {
+  async connect(provider: string, token: string): Promise<ProviderConnectResult> {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const authHeader = sessionData?.session?.access_token
+      ? { Authorization: `Bearer ${sessionData.session.access_token}` }
+      : undefined;
+
+    if (!authHeader) {
+      throw new Error('Please sign in before connecting a deployment provider.');
+    }
+
+    const response = await supabase.functions.invoke('connect-provider', {
+      headers: { ...authHeader },
+      body: { provider, token },
+    });
+
+    if (response.error) {
+      let message = response.error.message;
+      try {
+        const details = await response.error.context?.json?.();
+        if (details?.error) message = details.error;
+      } catch {
+        // fallback
+      }
+      throw new Error(message);
+    }
+
+    const data = response.data as ProviderConnectResult;
+    if (!data || !data.success) {
+      throw new Error(`Failed to connect ${provider}`);
+    }
+
+    return data;
+  },
+
+  async sync(provider: string): Promise<ProviderSyncResult> {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const authHeader = sessionData?.session?.access_token
+      ? { Authorization: `Bearer ${sessionData.session.access_token}` }
+      : undefined;
+
+    if (!authHeader) {
+      throw new Error('Please sign in before syncing deployments.');
+    }
+
+    const response = await supabase.functions.invoke('sync-deployments', {
+      headers: { ...authHeader },
+      body: { provider },
+    });
+
+    if (response.error) {
+      let message = response.error.message;
+      try {
+        const details = await response.error.context?.json?.();
+        if (details?.error) message = details.error;
+      } catch {
+        // fallback
+      }
+      throw new Error(message);
+    }
+
+    const data = response.data as ProviderSyncResult;
+    if (!data || !data.success) {
+      throw new Error(`Failed to sync deployments for ${provider}`);
+    }
+
+    return data;
+  },
+};
 
 export const PROVIDERS: DeploymentProvider[] = [
   {

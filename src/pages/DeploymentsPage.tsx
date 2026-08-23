@@ -2,7 +2,17 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Rocket, Plus, Search, RefreshCw, ExternalLink, AlertCircle, Moon, Globe, Activity, TrendingUp, Loader2, Clipboard } from 'lucide-react';
 import { Button, Input, Card, StatusBadge, EmptyState, Modal, Select, StatCard } from '@/components/ui';
 import { PageHeader } from '@/components/design/PageHeader';
-import { useDeployments, useCreateDeployment, useUpdateDeployment, useDeleteDeployment, useIntegrations, useRepositories, useQueryInitialLoading, useLogActivity } from '@/hooks/api';
+import {
+  useDeployments,
+  useCreateDeployment,
+  useUpdateDeployment,
+  useDeleteDeployment,
+  useIntegrations,
+  useRepositories,
+  useQueryInitialLoading,
+  useLogActivity,
+  useSyncDeployments,
+} from '@/hooks/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { checkUrlHealth, calculateHealthScore, detectPlatformFromUrl, detectSleepingService, type HealthCheckResult } from '@/services/health';
 
@@ -40,6 +50,8 @@ export function DeploymentsPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [healthData, setHealthData] = useState<Map<string, DeploymentHealth>>(new Map());
   const [checkingAll, setCheckingAll] = useState(false);
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [syncStatusBanner, setSyncStatusBanner] = useState<string | null>(null);
 
   const { data: deployments = [], isPending, fetchStatus, refetch } = useDeployments();
   const { data: integrations = [] } = useIntegrations();
@@ -48,6 +60,7 @@ export function DeploymentsPage() {
   const createDeployment = useCreateDeployment();
   const updateDeployment = useUpdateDeployment();
   const deleteDeployment = useDeleteDeployment();
+  const syncDeployments = useSyncDeployments();
   const logActivity = useLogActivity();
 
   const [newDeployment, setNewDeployment] = useState({
@@ -65,7 +78,7 @@ export function DeploymentsPage() {
       return updated;
     });
 
-    const healthResult = await checkUrlHealth(url);
+    const healthResult = await checkUrlHealth(url, platform, deploymentId);
     const isSleeping = detectSleepingService(healthResult.responseTimeMs || 0, platform);
 
     if (healthResult.status === 'live' && isSleeping) {
@@ -93,12 +106,46 @@ export function DeploymentsPage() {
     if (healthResult.status !== 'offline') {
       await updateDeployment.mutateAsync({
         deploymentId,
-        updates: { status: healthResult.status },
+        updates: {
+          status: healthResult.status,
+          response_time_ms: healthResult.responseTimeMs,
+          ssl_status: healthResult.sslValid ? 'valid' : 'invalid',
+        },
       });
     }
 
     return healthResult;
   }, [updateDeployment]);
+
+  const handleSyncAllProviders = async () => {
+    const connectedProviders = integrations
+      .filter((i) => i.connected && ['vercel', 'netlify', 'render', 'railway'].includes(i.platform))
+      .map((i) => i.platform);
+
+    if (connectedProviders.length === 0) {
+      setSyncStatusBanner('No deployment providers connected yet. Connect your provider in Integrations.');
+      setTimeout(() => setSyncStatusBanner(null), 4000);
+      return;
+    }
+
+    setIsSyncingAll(true);
+    setSyncStatusBanner(null);
+    let totalImported = 0;
+
+    try {
+      for (const provider of connectedProviders) {
+        const result = await syncDeployments.mutateAsync(provider);
+        totalImported += result.count;
+      }
+      setSyncStatusBanner(`Successfully synchronized ${totalImported} deployment${totalImported === 1 ? '' : 's'} across ${connectedProviders.length} connected provider${connectedProviders.length === 1 ? '' : 's'}.`);
+      setTimeout(() => setSyncStatusBanner(null), 5000);
+    } catch (err) {
+      setSyncStatusBanner(err instanceof Error ? `Sync failed: ${err.message}` : 'Failed to sync provider deployments.');
+      setTimeout(() => setSyncStatusBanner(null), 5000);
+    } finally {
+      setIsSyncingAll(false);
+    }
+  };
 
   const checkAllDeployments = async () => {
     if (deployments.length === 0) return;
@@ -235,9 +282,17 @@ export function DeploymentsPage() {
       <PageHeader
         eyebrow="Infrastructure"
         title="Deployments"
-        description="Track live URLs, platform health, and real-time deployment status."
+        description="Track live URLs, platform health, and real-time deployment status from your connected providers."
         actions={
           <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={handleSyncAllProviders}
+              disabled={isSyncingAll}
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${isSyncingAll ? 'animate-spin' : ''}`} />
+              {isSyncingAll ? 'Syncing...' : 'Sync Providers'}
+            </Button>
             <Button variant="secondary" onClick={checkAllDeployments} disabled={!deployments.length || checkingAll}>
               {checkingAll ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Activity className="w-4 h-4 mr-2" />}
               Health Check
@@ -253,6 +308,15 @@ export function DeploymentsPage() {
           </div>
         }
       />
+
+      {syncStatusBanner && (
+        <Card className="p-4 bg-slate-900 text-white border-0 shadow-md">
+          <div className="flex items-center gap-3">
+            <Activity className="w-5 h-5 text-violet-400 flex-shrink-0" />
+            <p className="text-sm">{syncStatusBanner}</p>
+          </div>
+        </Card>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard title="Total" value={deployments.length} icon={Rocket} color="primary" subtitle="Tracked endpoints" />

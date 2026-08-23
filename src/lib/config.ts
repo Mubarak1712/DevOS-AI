@@ -101,10 +101,6 @@ export const config = {
     return [
       { key: 'SUPABASE_SERVICE_ROLE_KEY', name: 'Supabase Service Role', category: 'Supabase', configured: false, required: true, description: 'Set in Supabase Edge Function secrets' },
       { key: 'GITHUB_CLIENT_SECRET', name: 'GitHub Client Secret', category: 'GitHub', configured: false, required: false, description: 'Set in Supabase Edge Function secrets' },
-      { key: 'VERCEL_TOKEN', name: 'Vercel Token', category: 'Deployments', configured: false, required: false, description: 'Set in Supabase Edge Function secrets' },
-      { key: 'NETLIFY_TOKEN', name: 'Netlify Token', category: 'Deployments', configured: false, required: false, description: 'Set in Supabase Edge Function secrets' },
-      { key: 'RAILWAY_TOKEN', name: 'Railway Token', category: 'Deployments', configured: false, required: false, description: 'Set in Supabase Edge Function secrets' },
-      { key: 'RENDER_API_KEY', name: 'Render API Key', category: 'Deployments', configured: false, required: false, description: 'Set in Supabase Edge Function secrets (RENDER_API_KEY)' },
       { key: 'GROQ_API_KEY', name: 'Groq API Key', category: 'AI', configured: false, required: false, description: 'Set in Supabase Edge Function secrets for AI Studio' },
       { key: 'GEMINI_API_KEY', name: 'Gemini API Key', category: 'AI', configured: false, required: false, description: 'Set in Supabase Edge Function secrets for AI Studio' },
     ];

@@ -11,6 +11,7 @@ import {
   activityLogService,
 } from '@/services/api';
 import { githubService } from '@/services/github';
+import { providerService } from '@/services/providers';
 import { fetchProviderConfigStatus } from '@/lib/config';
 
 export { useQueryClient };
@@ -172,6 +173,20 @@ export function useDeleteDeployment() {
   });
 }
 
+export function useSyncDeployments() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (provider: string) => providerService.sync(provider),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      queryClient.invalidateQueries({ queryKey: ['integrations'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['activity'] });
+    },
+  });
+}
+
 // Integrations hooks
 export function useIntegrations() {
   const { userId, isReady } = useAuthReady();
@@ -190,6 +205,21 @@ export function useIntegration(platform: string) {
     queryKey: ['integration', platform, userId],
     queryFn: () => integrationService.getByPlatform(userId!, platform),
     enabled: isReady && !!platform,
+  });
+}
+
+export function useConnectProvider() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ provider, token }: { provider: string; token: string }) =>
+      providerService.connect(provider, token),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['integrations'] });
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['activity'] });
+    },
   });
 }
 
@@ -218,6 +248,7 @@ export function useDisconnectIntegration() {
       queryClient.invalidateQueries({ queryKey: ['integration'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       queryClient.invalidateQueries({ queryKey: ['repositories'] });
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
     },
   });
 }
