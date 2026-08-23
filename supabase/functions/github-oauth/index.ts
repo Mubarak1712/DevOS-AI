@@ -81,9 +81,12 @@ Deno.serve(async (req: Request) => {
     const authenticatedUserId = user.id;
 
     // 2. Validate server secret configuration
-    if (!GITHUB_CLIENT_SECRET) {
+    const envSecret = (Deno.env.get('GITHUB_CLIENT_SECRET') || GITHUB_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
+    const envClientId = (Deno.env.get('GITHUB_CLIENT_ID') || Deno.env.get('VITE_GITHUB_CLIENT_ID') || '').trim().replace(/^["']|["']$/g, '');
+
+    if (!envSecret) {
       return new Response(
-        JSON.stringify({ error: 'GitHub OAuth credentials not configured on server' }),
+        JSON.stringify({ error: 'GitHub OAuth credentials (GITHUB_CLIENT_SECRET) not configured on server' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -113,7 +116,8 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    if (!client_id) {
+    const effectiveClientId = ((client_id || envClientId) as string || '').trim().replace(/^["']|["']$/g, '');
+    if (!effectiveClientId) {
       return new Response(
         JSON.stringify({ error: 'client_id is required for GitHub OAuth code exchange' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -134,19 +138,24 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    const effectiveRedirectUri = (redirect_uri as string).trim();
+    const effectiveState = (state as string).trim();
+    const effectiveCode = (code as string).trim();
+
     // 4. Exchange code for access token with GitHub
     const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
+        'User-Agent': 'DevOS-AI',
       },
       body: JSON.stringify({
-        client_id,
-        client_secret: GITHUB_CLIENT_SECRET,
-        code: code,
-        redirect_uri,
-        state,
+        client_id: effectiveClientId,
+        client_secret: envSecret,
+        code: effectiveCode,
+        redirect_uri: effectiveRedirectUri,
+        state: effectiveState,
       }),
     });
 
