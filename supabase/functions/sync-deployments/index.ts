@@ -414,13 +414,37 @@ Deno.serve(async (req: Request) => {
 
     const nowIso = new Date().toISOString();
 
-    // 5. Upsert active deployments for this user
+    // 5. Fetch user repositories to auto-link repository_id
+    const { data: userRepos } = await supabase
+      .from('repositories')
+      .select('id, name, full_name')
+      .eq('user_id', authenticatedUserId);
+
+    const repoMap = new Map<string, string>();
+    for (const r of userRepos || []) {
+      if (r.name) repoMap.set(r.name.toLowerCase(), r.id);
+      if (r.full_name) repoMap.set(r.full_name.toLowerCase(), r.id);
+    }
+
+    // 6. Upsert active deployments for this user
     for (const d of deployments) {
       if (!d.url && !d.name) continue;
 
+      const normalizedName = d.name.toLowerCase();
+      let matchedRepoId: string | null = repoMap.get(normalizedName) || null;
+      if (!matchedRepoId) {
+        // Check partial match (e.g. repo "my-app" in deployment "my-app-prod")
+        for (const [rName, rId] of repoMap.entries()) {
+          if (normalizedName.includes(rName)) {
+            matchedRepoId = rId;
+            break;
+          }
+        }
+      }
+
       const { data: existing } = await supabase
         .from('deployments')
-        .select('id')
+        .select('id, repository_id')
         .eq('user_id', authenticatedUserId)
         .eq('platform', provider)
         .eq('name', d.name)
@@ -430,9 +454,12 @@ Deno.serve(async (req: Request) => {
         await supabase
           .from('deployments')
           .update({
+            provider: provider,
             url: d.url,
             status: d.status,
             environment: d.environment,
+            branch: d.branch || null,
+            repository_id: matchedRepoId || existing.repository_id || null,
             last_deployed_at: d.lastDeployedAt || nowIso,
             updated_at: nowIso,
           })
@@ -441,10 +468,13 @@ Deno.serve(async (req: Request) => {
         await supabase.from('deployments').insert({
           user_id: authenticatedUserId,
           platform: provider,
+          provider: provider,
           name: d.name,
           url: d.url,
           status: d.status,
           environment: d.environment,
+          branch: d.branch || null,
+          repository_id: matchedRepoId,
           last_deployed_at: d.lastDeployedAt || nowIso,
           created_at: nowIso,
           updated_at: nowIso,

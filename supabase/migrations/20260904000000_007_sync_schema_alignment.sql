@@ -1,4 +1,4 @@
-﻿-- Schema Alignment Migration
+-- Schema Alignment Migration
 -- Ensures all columns and tables expected by the application exist idempotently on the remote database.
 
 -- 1. Align public.repositories
@@ -125,6 +125,11 @@ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'deployments' AND policyname = 'deployments_delete_own') THEN
     CREATE POLICY "deployments_delete_own" ON public.deployments FOR DELETE TO authenticated USING (user_id = auth.uid());
+  END IF;
+
+  -- Provider credentials policies (Delete own on disconnect, server handles select/insert/update)
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'provider_credentials' AND policyname = 'provider_credentials_delete_own') THEN
+    CREATE POLICY "provider_credentials_delete_own" ON public.provider_credentials FOR DELETE TO authenticated USING (user_id = auth.uid());
   END IF;
 END $$;
 

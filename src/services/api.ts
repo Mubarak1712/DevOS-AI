@@ -416,6 +416,13 @@ export const integrationService = {
       .eq('user_id', userId)
       .eq('platform', platform);
     if (error) throw error;
+
+    // Also remove securely stored provider credential if exists
+    await supabase
+      .from('provider_credentials')
+      .delete()
+      .eq('user_id', userId)
+      .eq('provider', platform);
   },
 };
 
