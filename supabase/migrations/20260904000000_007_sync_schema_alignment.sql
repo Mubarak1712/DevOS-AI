@@ -127,7 +127,10 @@ BEGIN
     CREATE POLICY "deployments_delete_own" ON public.deployments FOR DELETE TO authenticated USING (user_id = auth.uid());
   END IF;
 
-  -- Provider credentials policies (Delete own on disconnect, server handles select/insert/update)
+  -- Provider credentials policies (User-scoped access for select and delete)
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'provider_credentials' AND policyname = 'provider_credentials_select_own') THEN
+    CREATE POLICY "provider_credentials_select_own" ON public.provider_credentials FOR SELECT TO authenticated USING (user_id = auth.uid());
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'provider_credentials' AND policyname = 'provider_credentials_delete_own') THEN
     CREATE POLICY "provider_credentials_delete_own" ON public.provider_credentials FOR DELETE TO authenticated USING (user_id = auth.uid());
   END IF;
