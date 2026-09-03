@@ -213,17 +213,19 @@ Deno.serve(async (req: Request) => {
       email: typeof githubUser.email === 'string' ? githubUser.email : null,
     };
 
-    // 6. Update user profile in public.users if not set
-    if (githubUserData.name || githubUserData.avatar_url) {
-      await supabase
-        .from('users')
-        .update({
-          name: githubUserData.name || githubUserData.login,
+    // 6. Ensure user record exists in public.users (with upsert)
+    await supabase
+      .from('users')
+      .upsert(
+        {
+          id: authenticatedUserId,
+          email: user.email || githubUserData.email,
+          name: githubUserData.name || githubUserData.login || user.email?.split('@')[0],
           avatar_url: githubUserData.avatar_url,
           updated_at: new Date().toISOString(),
-        })
-        .eq('id', authenticatedUserId);
-    }
+        },
+        { onConflict: 'id' }
+      );
 
     // 7. Store integration and securely preserve credential server-side
     const nowIso = new Date().toISOString();
