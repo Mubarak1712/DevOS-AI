@@ -70,8 +70,8 @@ export function GitHubPage() {
     }
   };
 
-  const githubIntegration = integrations.find((i) => i.platform === 'github');
-  const isConnected = githubIntegration?.connected === true || repositories.length > 0;
+  const githubIntegration = integrations.find((i) => i.platform === 'github' && i.connected === true);
+  const isConnected = !!githubIntegration;
 
   const activeRepos = repositories.filter((repo) => {
     if (!repo.last_commit_at) return false;

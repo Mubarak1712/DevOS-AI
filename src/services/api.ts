@@ -417,6 +417,14 @@ export const integrationService = {
       .eq('platform', platform);
     if (error) throw error;
 
+    // Clean up user repositories when GitHub is disconnected
+    if (platform === 'github') {
+      await supabase
+        .from('repositories')
+        .delete()
+        .eq('user_id', userId);
+    }
+
     // Also remove securely stored provider credential if exists
     await supabase
       .from('provider_credentials')
