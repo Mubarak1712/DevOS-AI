@@ -309,7 +309,7 @@ Deno.serve(async (req: Request) => {
 
       await supabase
         .from('repositories')
-        .upsert(repoRows, { onConflict: 'github_id' });
+        .upsert(repoRows, { onConflict: 'user_id,github_id' });
     }
 
     // 10. Log activity

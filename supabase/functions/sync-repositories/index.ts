@@ -201,7 +201,7 @@ Deno.serve(async (req: Request) => {
     if (repositoryRows.length > 0) {
       const { error: upsertError } = await supabase
         .from('repositories')
-        .upsert(repositoryRows, { onConflict: 'github_id' });
+        .upsert(repositoryRows, { onConflict: 'user_id,github_id' });
 
       if (upsertError) {
         console.error('Error upserting repositories:', upsertError);

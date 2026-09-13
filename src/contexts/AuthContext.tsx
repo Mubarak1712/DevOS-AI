@@ -92,6 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const initialized = useRef(false);
+  const currentUserIdRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
 
   useEffect(() => {
@@ -99,6 +100,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
       if (!mounted) return;
+
+      const nextUserId = nextSession?.user?.id ?? null;
+
+      // When user changes (e.g. User A -> User B or User A -> logged out), wipe query cache
+      if (currentUserIdRef.current !== null && currentUserIdRef.current !== nextUserId) {
+        queryClient.clear();
+      }
+      currentUserIdRef.current = nextUserId;
 
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
@@ -108,13 +117,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
       }
 
-      if (nextSession?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION' || event === 'PASSWORD_RECOVERY')) {
+      if (event === 'SIGNED_OUT' || !nextSession?.user) {
+        clearAuthStorage();
+        ensuredUserIds.clear();
+        queryClient.clear();
+      } else if (nextSession?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION' || event === 'PASSWORD_RECOVERY')) {
         ensuredUserIds.delete(nextSession.user.id);
         ensureUserProfile(nextSession.user).catch(err => {
           console.error('[Auth] Background profile ensure failed:', err);
         });
-      } else if (!nextSession?.user) {
-        ensuredUserIds.clear();
       }
     });
 
@@ -131,7 +142,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(timeoutId);
       subscription.unsubscribe();
     };
-  }, []);
+  }, [queryClient]);
 
   const signUp = async (email: string, password: string, name: string) => {
     const emailRedirectTo = (
