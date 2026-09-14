@@ -57,6 +57,7 @@ export const githubService = {
       redirect_uri: redirectUri,
       scope: 'repo user',
       state,
+      prompt: 'consent',
     });
 
     window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`;
