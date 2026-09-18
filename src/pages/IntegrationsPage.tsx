@@ -76,13 +76,6 @@ const deploymentProviders: ProviderConfig[] = [
   },
 ];
 
-function isIntegrationConnected(
-  integrations: Array<{ platform: string; connected: boolean | null }>,
-  platform: string
-) {
-  return integrations.some((i) => i.platform === platform && i.connected === true);
-}
-
 export function IntegrationsPage() {
   const { user, loading: authLoading } = useAuth();
   const [selectedProvider, setSelectedProvider] = useState<ProviderConfig | null>(null);
@@ -113,13 +106,17 @@ export function IntegrationsPage() {
     integrationsFetchStatus
   );
 
-  const githubConnected = isIntegrationConnected(integrations, 'github');
+  const getIntegration = (providerId: string) =>
+    integrations.find((i) => i.platform === providerId);
+
+  const githubIntegration = getIntegration('github');
+  const githubConnected = githubIntegration?.connected === true;
+  const githubMetadata = (githubIntegration?.metadata as Record<string, unknown>) || {};
+  const githubAccount = (githubMetadata.login || githubMetadata.username || githubMetadata.name) as string | undefined;
+  const githubAvatar = githubMetadata.avatar_url as string | undefined;
   const connectedCount = integrations.filter((i) => i.connected === true).length;
   const deploymentCount = deployments.length;
   const repositoryCount = repositories.length;
-
-  const getIntegration = (providerId: string) =>
-    integrations.find((i) => i.platform === providerId);
 
   const providerDeployments = (providerId: string) =>
     deployments.filter((d) => d.platform === providerId).length;
@@ -300,10 +297,20 @@ export function IntegrationsPage() {
                   Sync your repositories, watch commit activity, and link repositories to deployment environments.
                 </p>
                 {githubConnected && (
-                  <p className="text-sm font-medium text-emerald-700 mt-3 flex items-center gap-1.5">
-                    <CheckCircle className="w-4 h-4" />
-                    {repositoryCount} synced {repositoryCount === 1 ? 'repository' : 'repositories'}
-                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+                    {githubAccount && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 text-slate-800 text-xs font-medium">
+                        {githubAvatar && (
+                          <img src={githubAvatar} alt={githubAccount} className="w-3.5 h-3.5 rounded-full" />
+                        )}
+                        @{githubAccount}
+                      </span>
+                    )}
+                    <span className="font-medium text-emerald-700 flex items-center gap-1.5 text-xs">
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      {repositoryCount} synced {repositoryCount === 1 ? 'repository' : 'repositories'}
+                    </span>
+                  </div>
                 )}
               </div>
             </div>

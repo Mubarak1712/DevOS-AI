@@ -72,6 +72,9 @@ export function GitHubPage() {
 
   const githubIntegration = integrations.find((i) => i.platform === 'github' && i.connected === true);
   const isConnected = !!githubIntegration;
+  const githubMetadata = (githubIntegration?.metadata as Record<string, unknown>) || {};
+  const githubLogin = (githubMetadata.login || githubMetadata.username || githubMetadata.name) as string | undefined;
+  const githubAvatar = githubMetadata.avatar_url as string | undefined;
 
   const activeRepos = repositories.filter((repo) => {
     if (!repo.last_commit_at) return false;
@@ -147,7 +150,15 @@ export function GitHubPage() {
       <div className="rounded-[32px] border border-[#D9C5FF] bg-[#FCEEF8] p-6 shadow-[0_20px_60px_rgba(124,58,237,0.08)]">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#5E4F7C]">GitHub</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#5E4F7C]">GitHub</p>
+              {isConnected && githubLogin && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#EADCF8] text-[#4C2A8C] text-xs font-medium">
+                  {githubAvatar && <img src={githubAvatar} alt={githubLogin} className="w-3.5 h-3.5 rounded-full" />}
+                  @{githubLogin}
+                </span>
+              )}
+            </div>
             <h1 className="mt-2 text-3xl font-bold text-[#1F1145]">Repository explorer</h1>
             <p className="mt-2 max-w-2xl text-sm text-[#5E4F7C]">A cleaner, developer-focused list of your connected GitHub repositories.</p>
           </div>
