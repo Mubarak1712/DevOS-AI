@@ -33,6 +33,38 @@ DevOS-AI centralizes developer workflows into a single dashboard. It connects yo
 
 ---
 
+## Application Screenshots
+
+### Command Center & Dashboard
+![DevOS-AI Dashboard](public/screenshots/dashboard.png)
+*Centralized workspace command center with real-time metrics, quick actions, and setup status.*
+
+---
+
+### GitHub Integration & Repository Explorer
+![DevOS-AI GitHub Integration](public/screenshots/github-integration.png)
+*Connected GitHub profile management, synchronized repository list, activity tracking, and multi-user isolation.*
+
+---
+
+### Projects Workspace
+![DevOS-AI Projects](public/screenshots/projects.png)
+*Project tracking and active engineering roadmap management backed by database records.*
+
+---
+
+### Deployments & Cloud Infrastructure
+![DevOS-AI Deployments](public/screenshots/deployments.png)
+*Zero-token deployment discovery, platform health monitoring, and multi-cloud environment tracking.*
+
+---
+
+### Provider Integrations
+![DevOS-AI Integrations](public/screenshots/integrations.png)
+*OAuth and token-based connection hub for GitHub, Vercel, Netlify, Render, and Railway.*
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
