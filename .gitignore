@@ -1,3 +1,4 @@
+# Logs
 logs
 *.log
 npm-debug.log*
@@ -6,17 +7,28 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Dependencies
+node_modules/
+
+# Production build outputs
+dist/
+dist-ssr/
+build/
+coverage/
+
+# Local cache & temp
 *.local
 .temp/
 supabase/.temp/
+.eslintcache
+.turbo/
 
+# Editor & OS files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
+Thumbs.db
 *.suo
 *.ntvs*
 *.njsproj
@@ -27,10 +39,15 @@ supabase/.temp/
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.cert
+*.crt
 
 # Archives & binaries
 *.zip
 *.tar
 *.gz
 *.tgz
-
+*.rar
+*.7z

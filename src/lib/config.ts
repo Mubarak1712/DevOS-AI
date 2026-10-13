@@ -93,6 +93,14 @@ export const config = {
         required: false,
         description: 'GitHub OAuth App Client ID',
       },
+      {
+        key: 'VITE_GITHUB_REDIRECT_URI',
+        name: 'GitHub Redirect URI',
+        category: 'GitHub',
+        configured: hasEnvVar('VITE_GITHUB_REDIRECT_URI'),
+        required: false,
+        description: 'OAuth callback endpoint (falls back automatically to current window origin)',
+      },
     ];
   },
 
@@ -100,8 +108,8 @@ export const config = {
   getServerConfigDocumentation(): ConfigStatus[] {
     return [
       { key: 'SUPABASE_SERVICE_ROLE_KEY', name: 'Supabase Service Role', category: 'Supabase', configured: false, required: true, description: 'Set in Supabase Edge Function secrets' },
-      { key: 'GITHUB_CLIENT_SECRET', name: 'GitHub Client Secret', category: 'GitHub', configured: false, required: false, description: 'Set in Supabase Edge Function secrets' },
-      { key: 'GROQ_API_KEY', name: 'Groq API Key', category: 'AI', configured: false, required: false, description: 'Set in Supabase Edge Function secrets for AI Studio' },
+      { key: 'GITHUB_CLIENT_SECRET', name: 'GitHub Client Secret', category: 'GitHub', configured: false, required: true, description: 'Set in Supabase Edge Function secrets' },
+      { key: 'GROQ_API_KEY', name: 'Groq API Key', category: 'AI', configured: false, required: true, description: 'Set in Supabase Edge Function secrets for AI Studio' },
       { key: 'GEMINI_API_KEY', name: 'Gemini API Key', category: 'AI', configured: false, required: false, description: 'Set in Supabase Edge Function secrets for AI Studio' },
     ];
   },
@@ -125,16 +133,49 @@ export interface ProviderConfigStatus {
   provider: string;
   name: string;
   configured: boolean;
+  key?: string;
+  category?: string;
+  required?: boolean;
+  description?: string;
 }
 
 const DEFAULT_PROVIDER_CONFIGS: ProviderConfigStatus[] = [
-  { provider: 'vercel', name: 'Vercel', configured: false },
-  { provider: 'netlify', name: 'Netlify', configured: false },
-  { provider: 'render', name: 'Render', configured: false },
-  { provider: 'railway', name: 'Railway', configured: false },
-  { provider: 'github', name: 'GitHub (OAuth Secret)', configured: false },
-  { provider: 'groq', name: 'Groq', configured: false },
-  { provider: 'gemini', name: 'Gemini', configured: false },
+  {
+    provider: 'github',
+    name: 'GitHub OAuth Client Secret',
+    key: 'GITHUB_CLIENT_SECRET',
+    category: 'Authentication',
+    configured: false,
+    required: true,
+    description: 'Exchanges OAuth code for user access token to enable repository synchronization',
+  },
+  {
+    provider: 'groq',
+    name: 'Groq Cloud API Key',
+    key: 'GROQ_API_KEY',
+    category: 'AI Services',
+    configured: false,
+    required: true,
+    description: 'Primary LLM provider (Llama 3.3 70B) for DevOS-AI Studio fast idea analysis and specs',
+  },
+  {
+    provider: 'gemini',
+    name: 'Google Gemini API Key',
+    key: 'GEMINI_API_KEY',
+    category: 'AI Services',
+    configured: false,
+    required: false,
+    description: 'High-context fallback provider for deep architectural plans and technical documentation',
+  },
+  {
+    provider: 'supabase',
+    name: 'Supabase Service Role Key',
+    key: 'SUPABASE_SERVICE_ROLE_KEY',
+    category: 'Database & Auth',
+    configured: false,
+    required: true,
+    description: 'Enables administrative backend operations and background Edge Function tasks',
+  },
 ];
 
 // Fetch provider configuration status from server (with timeout so UI never hangs)

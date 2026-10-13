@@ -1,4 +1,4 @@
-﻿-- Fix repository uniqueness to be strictly per-user
+-- Fix repository uniqueness to be strictly per-user
 -- Drops the global UNIQUE (github_id) and replaces with UNIQUE (user_id, github_id)
 
 ALTER TABLE public.repositories

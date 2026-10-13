@@ -31,6 +31,7 @@ export function Navbar() {
 
   const isDashboard = location.pathname.startsWith('/dashboard') ||
     location.pathname.startsWith('/projects') ||
+    location.pathname.startsWith('/ideas') ||
     location.pathname.startsWith('/github') ||
     location.pathname.startsWith('/deployments') ||
     location.pathname.startsWith('/ai-studio') ||
@@ -42,6 +43,7 @@ export function Navbar() {
     location.pathname.startsWith('/admin') ||
     location.pathname.startsWith('/integrations') ||
     location.pathname.startsWith('/config');
+
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 10);

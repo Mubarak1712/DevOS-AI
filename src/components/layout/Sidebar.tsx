@@ -14,6 +14,7 @@ import {
   Building2,
   ChevronLeft,
   Sparkles,
+  Lightbulb,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSidebar } from '@/contexts/SidebarContext';
@@ -21,10 +22,12 @@ import { useSidebar } from '@/contexts/SidebarContext';
 const workspaceNav = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Projects', href: '/projects', icon: FolderKanban },
+  { label: 'Ideas', href: '/ideas', icon: Lightbulb },
   { label: 'GitHub', href: '/github', icon: Github },
   { label: 'Deployments', href: '/deployments', icon: Rocket },
   { label: 'Integrations', href: '/integrations', icon: Link2 },
 ];
+
 
 const intelligenceNav = [
   { label: 'AI Studio', href: '/ai-studio', icon: Brain, accent: true },

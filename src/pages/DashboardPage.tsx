@@ -4,9 +4,9 @@ import {
   Rocket,
   Link2,
   CheckCircle,
-  Circle,
   FolderKanban,
   Bell,
+  Lightbulb,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Card } from '@/components/ui';
@@ -50,9 +50,6 @@ export function DashboardPage() {
   const connectedIntegrations = integrations.filter((i) => i.connected === true).length;
   const hasDeployments = (stats?.deployments_count ?? deployments.length) > 0;
   const hasRepositories = (stats?.repositories_count ?? repositories.length) > 0;
-  const hasProviderConnected = integrations.some(
-    (i) => i.connected === true && ['vercel', 'netlify', 'render', 'railway'].includes(i.platform)
-  );
 
   const onboardingSteps: OnboardingStep[] = [
     {
@@ -65,22 +62,22 @@ export function DashboardPage() {
       icon: Github,
     },
     {
-      id: 'platforms',
-      title: 'Connect Deployment Platforms',
-      description: 'Sync Vercel, Netlify, Render, or Railway to track live deployments.',
-      href: '/integrations',
-      action: hasProviderConnected ? 'Connected' : 'Connect',
-      completed: hasProviderConnected,
-      icon: Link2,
+      id: 'deployments',
+      title: 'Discover Deployments',
+      description: 'Auto-discover live deployments from GitHub repos without manual provider tokens.',
+      href: '/deployments',
+      action: hasDeployments ? 'Discovered' : 'Scan',
+      completed: hasDeployments,
+      icon: Rocket,
     },
     {
-      id: 'sync',
-      title: 'Sync Your Data',
-      description: 'Once connected, repositories and deployments sync from your database.',
-      href: '/deployments',
-      action: hasRepositories || hasDeployments ? 'Synced' : 'Sync',
-      completed: hasRepositories || hasDeployments,
-      icon: Rocket,
+      id: 'projects',
+      title: 'Track Projects & Ideas',
+      description: 'Organize active development roadmaps and capture spikes in your Idea Vault.',
+      href: '/projects',
+      action: (stats?.projects_count ?? 0) > 0 ? 'Active' : 'Explore',
+      completed: (stats?.projects_count ?? 0) > 0,
+      icon: FolderKanban,
     },
   ];
 
@@ -260,15 +257,15 @@ export function DashboardPage() {
             </Card>
           </Link>
 
-          <Link to="/config">
-            <Card className="h-full border border-[#DDD6FE] bg-[#FCE7F3] shadow-[0_10px_35px_rgba(236,72,153,0.08)]">
+          <Link to="/ideas">
+            <Card className="h-full border border-[#DDD6FE] bg-[#FCE7F3] shadow-[0_10px_35px_rgba(236,72,153,0.08)] rounded-[28px]">
               <div className="flex items-center gap-3 p-5">
                 <div className="w-12 h-12 rounded-3xl bg-white/90 flex items-center justify-center shadow-sm">
-                  <Circle className="w-6 h-6 text-rose-700" />
+                  <Lightbulb className="w-6 h-6 text-amber-600" />
                 </div>
                 <div>
-                  <p className="font-semibold text-slate-900">Configuration</p>
-                  <p className="text-sm text-slate-600">Settings</p>
+                  <p className="font-semibold text-slate-900">Idea Vault</p>
+                  <p className="text-sm text-slate-600">Capture dev ideas</p>
                 </div>
               </div>
             </Card>

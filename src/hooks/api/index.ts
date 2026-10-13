@@ -9,6 +9,7 @@ import {
   settingsService,
   analyticsService,
   activityLogService,
+  ideaService,
 } from '@/services/api';
 import { githubService } from '@/services/github';
 import { providerService } from '@/services/providers';
@@ -45,10 +46,12 @@ export function useProjects() {
 }
 
 export function useProject(projectId: string | undefined) {
+  const { userId, isReady } = useAuthReady();
+
   return useQuery({
-    queryKey: ['project', projectId],
+    queryKey: ['project', projectId, userId],
     queryFn: () => projectService.getById(projectId!),
-    enabled: !!projectId,
+    enabled: isReady && !!projectId,
   });
 }
 
@@ -110,6 +113,7 @@ export function useSyncRepositories() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['repositories'] });
       queryClient.invalidateQueries({ queryKey: ['integrations'] });
+      queryClient.invalidateQueries({ queryKey: ['deployments'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       queryClient.invalidateQueries({ queryKey: ['activity'] });
     },
@@ -128,10 +132,12 @@ export function useDeployments() {
 }
 
 export function useDeployment(deploymentId: string | undefined) {
+  const { userId, isReady } = useAuthReady();
+
   return useQuery({
-    queryKey: ['deployment', deploymentId],
+    queryKey: ['deployment', deploymentId, userId],
     queryFn: () => deploymentService.getById(deploymentId!),
-    enabled: !!deploymentId,
+    enabled: isReady && !!deploymentId,
   });
 }
 
@@ -369,6 +375,65 @@ export function useLogActivity() {
     }) => activityLogService.log(userId!, action, resourceType, resourceId, details),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['activity'] });
+    },
+  });
+}
+
+// Ideas / Developer Vault hooks
+export function useIdeas() {
+  const { userId, isReady } = useAuthReady();
+
+  return useQuery({
+    queryKey: ['ideas', userId],
+    queryFn: () => ideaService.getAll(userId!),
+    enabled: isReady,
+  });
+}
+
+export function useIdea(ideaId: string | undefined) {
+  const { userId, isReady } = useAuthReady();
+
+  return useQuery({
+    queryKey: ['idea', ideaId, userId],
+    queryFn: () => ideaService.getById(userId!, ideaId!),
+    enabled: isReady && !!ideaId,
+  });
+}
+
+export function useCreateIdea() {
+  const { userId } = useAuthReady();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (idea: Omit<Parameters<typeof ideaService.create>[0], 'user_id'>) =>
+      ideaService.create({ ...idea, user_id: userId! }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ideas'] });
+    },
+  });
+}
+
+export function useUpdateIdea() {
+  const { userId } = useAuthReady();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ ideaId, updates }: { ideaId: string; updates: Parameters<typeof ideaService.update>[2] }) =>
+      ideaService.update(userId!, ideaId, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ideas'] });
+    },
+  });
+}
+
+export function useDeleteIdea() {
+  const { userId } = useAuthReady();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (ideaId: string) => ideaService.delete(userId!, ideaId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ideas'] });
     },
   });
 }

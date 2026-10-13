@@ -199,3 +199,18 @@ export interface Settings {
   created_at: string;
   updated_at: string;
 }
+
+export type IdeaCategory = 'project' | 'feature' | 'improvement' | 'technical' | 'experiment' | 'product' | 'thought';
+export type IdeaStatus = 'idea' | 'planned' | 'in_progress' | 'completed';
+
+export interface Idea {
+  id: string;
+  user_id: string;
+  title: string;
+  description?: string;
+  category: IdeaCategory;
+  tags?: string[];
+  status: IdeaStatus;
+  created_at: string;
+  updated_at: string;
+}

@@ -12,3 +12,4 @@ export { ProfilePage } from './ProfilePage';
 export { NotificationsPage } from './NotificationsPage';
 export { OrganizationPage } from './OrganizationPage';
 export { AdminPage } from './AdminPage';
+export { IdeasPage } from './IdeasPage';

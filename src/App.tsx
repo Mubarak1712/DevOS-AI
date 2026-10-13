@@ -29,6 +29,8 @@ const ProfilePage = lazy(() => import('@/pages/dashboard').then((m) => ({ defaul
 const NotificationsPage = lazy(() => import('@/pages/dashboard').then((m) => ({ default: m.NotificationsPage })));
 const OrganizationPage = lazy(() => import('@/pages/dashboard').then((m) => ({ default: m.OrganizationPage })));
 const AdminPage = lazy(() => import('@/pages/dashboard').then((m) => ({ default: m.AdminPage })));
+const IdeasPage = lazy(() => import('@/pages/dashboard').then((m) => ({ default: m.IdeasPage })));
+
 
 function PageLoader() {
   return (
@@ -113,9 +115,11 @@ function AppRoutes() {
       >
         <Route path="/dashboard" element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
         <Route path="/projects" element={<Suspense fallback={<PageLoader />}><ProjectsPage /></Suspense>} />
+        <Route path="/ideas" element={<Suspense fallback={<PageLoader />}><IdeasPage /></Suspense>} />
         <Route path="/github" element={<Suspense fallback={<PageLoader />}><GitHubPage /></Suspense>} />
         <Route path="/deployments" element={<Suspense fallback={<PageLoader />}><DeploymentsPage /></Suspense>} />
         <Route path="/integrations" element={<Suspense fallback={<PageLoader />}><IntegrationsPage /></Suspense>} />
+
         <Route path="/config" element={<Suspense fallback={<PageLoader />}><ConfigPage /></Suspense>} />
         <Route path="/ai-studio" element={<Suspense fallback={<PageLoader />}><AIStudioPage /></Suspense>} />
         <Route path="/analytics" element={<Suspense fallback={<PageLoader />}><AnalyticsPage /></Suspense>} />

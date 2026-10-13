@@ -1,7 +1,8 @@
 {
-  "name": "vite-react-typescript-starter",
+  "name": "devos-ai",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "AI-Powered Developer Operating System for unified GitHub repositories, deployment infrastructure, and AI-assisted engineering",
   "type": "module",
   "scripts": {
     "dev": "vite",

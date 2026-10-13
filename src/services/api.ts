@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import type { Database, Json } from '@/types/database';
+import type { Idea } from '@/types';
 
 // User profile operations
 export const userService = {
@@ -761,5 +762,211 @@ export const deploymentSyncService = {
 
     if (error && error.code !== 'PGRST116') throw error;
     return data;
+  },
+};
+
+// Idea & Developer Vault operations
+export const ideaService = {
+  getLocalStorageKey(userId: string) {
+    return `devos_ideas_${userId}`;
+  },
+
+  getLocalIdeas(userId: string): Idea[] {
+    try {
+      const raw = localStorage.getItem(this.getLocalStorageKey(userId));
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  },
+
+  setLocalIdeas(userId: string, ideas: Idea[]) {
+    try {
+      localStorage.setItem(this.getLocalStorageKey(userId), JSON.stringify(ideas));
+    } catch {
+      // Storage error ignored
+    }
+  },
+
+  async getAll(userId: string): Promise<Idea[]> {
+    try {
+      const { data, error } = await supabase
+        .from('ideas')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        const typedData = data as unknown as Idea[];
+        const local = this.getLocalIdeas(userId);
+        const dbIds = new Set(typedData.map((d) => d.id));
+        const unmigrated = local.filter((l) => !dbIds.has(l.id));
+
+        if (unmigrated.length > 0) {
+          try {
+            await supabase.from('ideas').insert(
+              unmigrated.map((u) => ({
+                id: u.id,
+                user_id: u.user_id,
+                title: u.title,
+                description: u.description || null,
+                category: u.category,
+                tags: u.tags,
+                status: u.status,
+                created_at: u.created_at,
+                updated_at: u.updated_at,
+              }))
+            );
+            const merged = [...unmigrated, ...typedData];
+            this.setLocalIdeas(userId, merged);
+            return merged;
+          } catch {
+            const merged = [...unmigrated, ...typedData];
+            return merged;
+          }
+        }
+
+        this.setLocalIdeas(userId, typedData);
+        return typedData;
+      }
+    } catch {
+      // Fall back to user-scoped local storage
+    }
+    return this.getLocalIdeas(userId);
+  },
+
+  async getById(userId: string, ideaId: string): Promise<Idea | null> {
+    try {
+      const { data, error } = await supabase
+        .from('ideas')
+        .select('*')
+        .eq('id', ideaId)
+        .eq('user_id', userId)
+        .single();
+
+      if (!error && data) return data as unknown as Idea;
+    } catch {
+      // Fallback
+    }
+    const local = this.getLocalIdeas(userId);
+    return local.find((i) => i.id === ideaId) || null;
+  },
+
+  async create(idea: {
+    user_id: string;
+    title: string;
+    description?: string;
+    category?: string;
+    tags?: string[];
+    status?: string;
+  }): Promise<Idea> {
+    const newId = typeof crypto?.randomUUID === 'function' ? crypto.randomUUID() : 'idea_' + Date.now();
+    const nowIso = new Date().toISOString();
+    const ideaObj: Idea = {
+      id: newId,
+      user_id: idea.user_id,
+      title: idea.title,
+      description: idea.description || undefined,
+      category: (idea.category as Idea['category']) || 'feature',
+      tags: idea.tags || [],
+      status: (idea.status as Idea['status']) || 'idea',
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+
+    try {
+      const { data, error } = await supabase
+        .from('ideas')
+        .insert({
+          id: ideaObj.id,
+          user_id: ideaObj.user_id,
+          title: ideaObj.title,
+          description: ideaObj.description || null,
+          category: ideaObj.category,
+          tags: ideaObj.tags,
+          status: ideaObj.status,
+          created_at: ideaObj.created_at,
+          updated_at: ideaObj.updated_at,
+        })
+        .select()
+        .single();
+
+      if (!error && data) {
+        const typedData = data as unknown as Idea;
+        const local = this.getLocalIdeas(idea.user_id);
+        this.setLocalIdeas(idea.user_id, [typedData, ...local]);
+        return typedData;
+      }
+    } catch {
+      // Use scoped local
+    }
+
+    const local = this.getLocalIdeas(idea.user_id);
+    const updated = [ideaObj, ...local];
+    this.setLocalIdeas(idea.user_id, updated);
+    return ideaObj;
+  },
+
+  async update(userId: string, ideaId: string, updates: Partial<{
+    title: string;
+    description: string;
+    category: string;
+    tags: string[];
+    status: string;
+  }>): Promise<Idea | null> {
+    const nowIso = new Date().toISOString();
+
+    try {
+      const { data, error } = await supabase
+        .from('ideas')
+        .update({ ...updates, updated_at: nowIso })
+        .eq('id', ideaId)
+        .eq('user_id', userId)
+        .select()
+        .single();
+
+      if (!error && data) {
+        const typedData = data as unknown as Idea;
+        const local = this.getLocalIdeas(userId);
+        const idx = local.findIndex((i) => i.id === ideaId);
+        if (idx >= 0) local[idx] = typedData;
+        this.setLocalIdeas(userId, local);
+        return typedData;
+      }
+    } catch {
+      // Use scoped local
+    }
+
+    const local = this.getLocalIdeas(userId);
+    const idx = local.findIndex((i) => i.id === ideaId);
+    if (idx >= 0) {
+      const updatedIdea: Idea = {
+        ...local[idx],
+        ...updates,
+        category: (updates.category as Idea['category']) || local[idx].category,
+        status: (updates.status as Idea['status']) || local[idx].status,
+        updated_at: nowIso,
+      };
+      local[idx] = updatedIdea;
+      this.setLocalIdeas(userId, local);
+      return updatedIdea;
+    }
+    return null;
+  },
+
+  async delete(userId: string, ideaId: string): Promise<void> {
+    try {
+      await supabase
+        .from('ideas')
+        .delete()
+        .eq('id', ideaId)
+        .eq('user_id', userId);
+    } catch {
+      // Storage fallback
+    }
+
+    const local = this.getLocalIdeas(userId);
+    const filtered = local.filter((i) => i.id !== ideaId);
+    this.setLocalIdeas(userId, filtered);
   },
 };

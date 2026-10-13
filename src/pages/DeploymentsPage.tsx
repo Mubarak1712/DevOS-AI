@@ -1,5 +1,21 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Rocket, Plus, Search, RefreshCw, ExternalLink, AlertCircle, Moon, Globe, Activity, TrendingUp, Loader2, Clipboard } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import {
+  Rocket,
+  Plus,
+  Search,
+  RefreshCw,
+  ExternalLink,
+  AlertCircle,
+  Moon,
+  Globe,
+  Activity,
+  TrendingUp,
+  Loader2,
+  Clipboard,
+  Info,
+  ArrowRight,
+} from 'lucide-react';
 import { Button, Input, Card, StatusBadge, EmptyState, Modal, Select, StatCard } from '@/components/ui';
 import { PageHeader } from '@/components/design/PageHeader';
 import {
@@ -11,10 +27,11 @@ import {
   useRepositories,
   useQueryInitialLoading,
   useLogActivity,
-  useSyncDeployments,
+  useSyncRepositories,
 } from '@/hooks/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { checkUrlHealth, calculateHealthScore, detectPlatformFromUrl, detectSleepingService, type HealthCheckResult } from '@/services/health';
+import type { GitHubSyncResult } from '@/services/github';
 
 const platforms = [
   { value: 'vercel', label: 'Vercel' },
@@ -53,6 +70,10 @@ export function DeploymentsPage() {
   const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [syncStatusBanner, setSyncStatusBanner] = useState<string | null>(null);
 
+  // Rich Scan Result Modal State
+  const [scanResult, setScanResult] = useState<GitHubSyncResult | null>(null);
+  const [isScanModalOpen, setIsScanModalOpen] = useState(false);
+
   const { data: deployments = [], isPending, fetchStatus, refetch } = useDeployments();
   const { data: integrations = [] } = useIntegrations();
   const { data: repositories = [] } = useRepositories();
@@ -60,8 +81,11 @@ export function DeploymentsPage() {
   const createDeployment = useCreateDeployment();
   const updateDeployment = useUpdateDeployment();
   const deleteDeployment = useDeleteDeployment();
-  const syncDeployments = useSyncDeployments();
+  const syncRepositories = useSyncRepositories();
   const logActivity = useLogActivity();
+
+  const githubIntegration = integrations.find((i) => i.platform === 'github');
+  const githubConnected = githubIntegration?.connected === true;
 
   const [newDeployment, setNewDeployment] = useState({
     platform: 'vercel',
@@ -117,31 +141,20 @@ export function DeploymentsPage() {
     return healthResult;
   }, [updateDeployment]);
 
-  const handleSyncAllProviders = async () => {
-    const connectedProviders = integrations
-      .filter((i) => i.connected && ['vercel', 'netlify', 'render', 'railway'].includes(i.platform))
-      .map((i) => i.platform);
-
-    if (connectedProviders.length === 0) {
-      setSyncStatusBanner('No deployment providers connected yet. Connect your provider in Integrations.');
-      setTimeout(() => setSyncStatusBanner(null), 4000);
-      return;
-    }
-
+  const handleScanGitHubRepositories = async () => {
     setIsSyncingAll(true);
     setSyncStatusBanner(null);
-    let totalImported = 0;
-
     try {
-      for (const provider of connectedProviders) {
-        const result = await syncDeployments.mutateAsync(provider);
-        totalImported += result.count;
-      }
-      setSyncStatusBanner(`Successfully synchronized ${totalImported} deployment${totalImported === 1 ? '' : 's'} across ${connectedProviders.length} connected provider${connectedProviders.length === 1 ? '' : 's'}.`);
-      setTimeout(() => setSyncStatusBanner(null), 5000);
+      const result = await syncRepositories.mutateAsync();
+      setScanResult(result);
+      setIsScanModalOpen(true);
+      const repCount = result?.repositories_scanned ?? result?.count ?? 0;
+      const depCount = result?.deployments_discovered ?? 0;
+      setSyncStatusBanner(`Scan completed: ${repCount} repositories scanned · ${depCount} live deployments discovered.`);
+      setTimeout(() => setSyncStatusBanner(null), 6000);
     } catch (err) {
-      setSyncStatusBanner(err instanceof Error ? `Sync failed: ${err.message}` : 'Failed to sync provider deployments.');
-      setTimeout(() => setSyncStatusBanner(null), 5000);
+      setSyncStatusBanner(err instanceof Error ? `Discovery error: ${err.message}` : 'Failed to scan GitHub repositories.');
+      setTimeout(() => setSyncStatusBanner(null), 6000);
     } finally {
       setIsSyncingAll(false);
     }
@@ -282,16 +295,15 @@ export function DeploymentsPage() {
       <PageHeader
         eyebrow="Infrastructure"
         title="Deployments"
-        description="Track live URLs, platform health, and real-time deployment status from your connected providers."
+        description="Track live URLs, platform health, and real-time deployment status with zero manual tokens."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button
-              variant="secondary"
-              onClick={handleSyncAllProviders}
-              disabled={isSyncingAll}
+              onClick={handleScanGitHubRepositories}
+              disabled={isSyncingAll || syncRepositories.isPending}
             >
-              <RefreshCw className={`w-4 h-4 mr-2 ${isSyncingAll ? 'animate-spin' : ''}`} />
-              {isSyncingAll ? 'Syncing...' : 'Sync Providers'}
+              <RefreshCw className={`w-4 h-4 mr-2 ${isSyncingAll || syncRepositories.isPending ? 'animate-spin' : ''}`} />
+              {isSyncingAll || syncRepositories.isPending ? 'Scanning GitHub...' : 'Scan GitHub Repositories'}
             </Button>
             <Button variant="secondary" onClick={checkAllDeployments} disabled={!deployments.length || checkingAll}>
               {checkingAll ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Activity className="w-4 h-4 mr-2" />}
@@ -301,9 +313,9 @@ export function DeploymentsPage() {
               <RefreshCw className="w-4 h-4 mr-2" />
               Refresh
             </Button>
-            <Button onClick={() => setIsAddModalOpen(true)}>
+            <Button variant="secondary" onClick={() => setIsAddModalOpen(true)}>
               <Plus className="w-4 h-4 mr-2" />
-              Add Deployment
+              Add Custom Deployment
             </Button>
           </div>
         }
@@ -311,9 +323,20 @@ export function DeploymentsPage() {
 
       {syncStatusBanner && (
         <Card className="p-4 bg-slate-900 text-white border-0 shadow-md">
-          <div className="flex items-center gap-3">
-            <Activity className="w-5 h-5 text-violet-400 flex-shrink-0" />
-            <p className="text-sm">{syncStatusBanner}</p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Activity className="w-5 h-5 text-violet-400 flex-shrink-0" />
+              <p className="text-sm font-medium">{syncStatusBanner}</p>
+            </div>
+            {scanResult && (
+              <button
+                type="button"
+                onClick={() => setIsScanModalOpen(true)}
+                className="text-xs text-violet-300 hover:text-white underline font-semibold whitespace-nowrap"
+              >
+                View Details
+              </button>
+            )}
           </div>
         </Card>
       )}
@@ -381,29 +404,26 @@ export function DeploymentsPage() {
           </div>
         </Card>
 
-        <Card className="p-5 border border-slate-200 shadow-sm">
-          <div className="space-y-4">
+        <Card className="p-5 border border-slate-200 shadow-sm flex flex-col justify-between">
+          <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm text-slate-500">Platform sync</p>
-                <h3 className="text-lg font-semibold text-slate-900">Connected providers</h3>
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Zero-Token Discovery</p>
+                <h3 className="text-base font-semibold text-slate-900 mt-0.5">Connected platforms</h3>
               </div>
-              <div className="text-right text-sm text-slate-500">
-                {connectedPlatforms.length} connected
-              </div>
+              <span className="text-xs bg-violet-100 text-violet-800 px-2 py-1 rounded-full font-semibold">
+                {connectedPlatforms.length} active
+              </span>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {platforms.slice(0, 8).map((platform) => (
-                <span
-                  key={platform.value}
-                  className={`rounded-full px-3 py-2 text-xs font-semibold ${connectedPlatforms.includes(platform.value) ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}
-                >
-                  {platform.label}
-                </span>
-              ))}
-            </div>
-            <p className="text-sm text-slate-500">Deployments are automatically associated with connected platforms and health checks run on demand.</p>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              DevOS AI parses repository homepages, GitHub Pages, and deployment webhooks automatically.
+            </p>
           </div>
+
+          <Link to="/integrations" className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-violet-600 hover:text-violet-800 font-semibold group">
+            <span>Manage Integrations</span>
+            <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+          </Link>
         </Card>
       </div>
 
@@ -417,14 +437,22 @@ export function DeploymentsPage() {
         <Card className="p-8 border border-slate-200 shadow-sm">
           <EmptyState
             icon={<Rocket className="w-8 h-8 text-slate-500" />}
-            title={search || platformFilter || statusFilter ? 'No deployments found' : 'No deployments tracked'}
+            title={search || platformFilter || statusFilter ? 'No deployments match your filters' : 'No deployments discovered yet'}
             description={
               search || platformFilter || statusFilter
                 ? 'Try adjusting your filters.'
-                : 'Add your first deployment to start monitoring performance and uptime.'
+                : 'DevOS AI automatically scans your connected GitHub repositories to detect live deployments on Vercel, Netlify, Render, Railway, and GitHub Pages — without requiring provider API tokens.'
             }
-            actionLabel={!search && !platformFilter && !statusFilter ? 'Add Deployment' : undefined}
-            onAction={!search && !platformFilter && !statusFilter ? () => setIsAddModalOpen(true) : undefined}
+            actionLabel={
+              !search && !platformFilter && !statusFilter
+                ? (githubConnected ? 'Scan GitHub Repositories' : 'Connect GitHub')
+                : undefined
+            }
+            onAction={
+              !search && !platformFilter && !statusFilter
+                ? (githubConnected ? handleScanGitHubRepositories : undefined)
+                : undefined
+            }
           />
         </Card>
       ) : (
@@ -545,31 +573,140 @@ export function DeploymentsPage() {
         </div>
       )}
 
-      <Card className="p-6 border border-slate-200 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">Supported Platforms</h2>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {platforms.map((platform) => (
-            <div
-              key={platform.value}
-              className={`flex items-center gap-3 rounded-3xl border px-4 py-4 ${connectedPlatforms.includes(platform.value) ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}
-            >
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                {platform.label.charAt(0)}
-              </div>
-              <div>
-                <p className="font-semibold text-slate-900">{platform.label}</p>
-                <p className="text-xs text-slate-500">{connectedPlatforms.includes(platform.value) ? 'Connected' : 'Available'}</p>
-              </div>
-            </div>
-          ))}
+      {/* Streamlined Platform Support & Integrations Callout */}
+      <Card className="p-6 border border-slate-200 bg-slate-50/70 shadow-sm rounded-[24px]">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-slate-900">Supported Deployment Platforms</h2>
+            <p className="text-sm text-slate-600">
+              DevOS automatically detects Vercel, Netlify, Render, Railway, GitHub Pages, Cloudflare, and Custom Domains from your repositories.
+            </p>
+          </div>
+          <Link to="/integrations">
+            <Button variant="secondary" size="sm" className="whitespace-nowrap">
+              Manage Integrations
+              <ArrowRight className="w-4 h-4 ml-1.5" />
+            </Button>
+          </Link>
         </div>
       </Card>
 
+      {/* Rich Deployment Scan Results Modal (Phase 3 UX) */}
+      <Modal
+        isOpen={isScanModalOpen}
+        onClose={() => setIsScanModalOpen(false)}
+        title="GitHub Deployment Discovery"
+        description="Detailed result breakdown from scanning your connected GitHub repositories."
+        size="lg"
+      >
+        {scanResult && (
+          <div className="space-y-5">
+            {/* Scan Metrics Overview */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-center">
+                <p className="text-xs text-slate-500 font-medium">Repositories</p>
+                <p className="text-2xl font-bold text-slate-900 mt-1">
+                  {scanResult.repositories_scanned ?? scanResult.count ?? 0}
+                </p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Scanned</p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-violet-50 border border-violet-200 text-center">
+                <p className="text-xs text-violet-700 font-medium">Discovered</p>
+                <p className="text-2xl font-bold text-violet-900 mt-1">
+                  {scanResult.deployments_discovered ?? 0}
+                </p>
+                <p className="text-[11px] text-violet-600 mt-0.5">Live URLs</p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-center">
+                <p className="text-xs text-emerald-700 font-medium">New Added</p>
+                <p className="text-2xl font-bold text-emerald-900 mt-1">
+                  {scanResult.new_deployments_added ?? 0}
+                </p>
+                <p className="text-[11px] text-emerald-600 mt-0.5">Stored</p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-sky-50 border border-sky-200 text-center">
+                <p className="text-xs text-sky-700 font-medium">Updated</p>
+                <p className="text-2xl font-bold text-sky-900 mt-1">
+                  {scanResult.deployments_updated ?? 0}
+                </p>
+                <p className="text-[11px] text-sky-600 mt-0.5">Refreshed</p>
+              </div>
+            </div>
+
+            {/* When 0 Deployments Discovered */}
+            {(scanResult.deployments_discovered ?? 0) === 0 ? (
+              <div className="p-5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 space-y-3">
+                <div className="flex items-start gap-3">
+                  <Info className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-semibold text-amber-900 text-sm">
+                      No publicly detectable deployment URLs were found in your GitHub repositories.
+                    </p>
+                    <p className="text-xs text-amber-800 leading-relaxed">
+                      A GitHub repository is not automatically a deployment. DevOS AI inspects repository metadata, configured homepage URLs, GitHub Pages, and GitHub Environments/Deployments to detect live endpoints.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-amber-200/70 text-xs text-amber-800">
+                  <p className="font-semibold mb-1">How to make your deployments auto-detectable:</p>
+                  <ul className="list-disc pl-5 space-y-0.5">
+                    <li>Set the <strong>About / Homepage URL</strong> in your GitHub repository settings to your live Vercel / Netlify / Render link.</li>
+                    <li>Enable <strong>GitHub Pages</strong> in repository settings.</li>
+                    <li>Or click <strong>Add Custom Deployment</strong> to track any live URL directly.</li>
+                  </ul>
+                </div>
+              </div>
+            ) : (
+              /* When Deployments Discovered */
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Discovered Deployments</p>
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                  {scanResult.discovered_details?.map((item, idx) => (
+                    <div key={idx} className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between gap-3 text-sm">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-slate-900 truncate">{item.repository}</span>
+                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 capitalize">
+                            {item.platform.replace('_', ' ')}
+                          </span>
+                        </div>
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-slate-500 hover:text-violet-600 truncate block mt-0.5"
+                        >
+                          {item.url}
+                        </a>
+                      </div>
+                      <span className="text-xs font-semibold px-2 py-1 rounded-full bg-emerald-100 text-emerald-800 flex-shrink-0 capitalize">
+                        {item.status || 'live'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-3 border-t border-slate-100">
+              <Button onClick={() => setIsScanModalOpen(false)}>
+                Done
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Add Custom Deployment Modal */}
       <Modal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        title="Add Deployment"
-        description="Track a new deployment from any platform."
+        title="Add Custom Deployment"
+        description="Track a custom domain or private deployment endpoint."
         size="md"
       >
         <div className="space-y-4">
@@ -634,6 +771,7 @@ export function DeploymentsPage() {
         </div>
       </Modal>
 
+      {/* Delete Deployment Modal */}
       <Modal
         isOpen={isDeleteModalOpen}
         onClose={() => { setIsDeleteModalOpen(false); setDeploymentToDelete(null); }}

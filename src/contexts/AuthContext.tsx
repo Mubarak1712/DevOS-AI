@@ -76,7 +76,8 @@ function clearAuthStorage() {
       key.includes('github_oauth') ||
       key.includes('oauth') ||
       key.includes('supabase') ||
-      key.startsWith('sb-')
+      key.startsWith('sb-') ||
+      key.includes('devos_')
     ) {
       keysToRemove.push(key);
     }
@@ -85,6 +86,7 @@ function clearAuthStorage() {
   keysToRemove.forEach((key) => localStorage.removeItem(key));
   sessionStorage.removeItem('github_oauth_processed_code');
   sessionStorage.removeItem('github_oauth_state');
+  sessionStorage.clear();
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -103,8 +105,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const nextUserId = nextSession?.user?.id ?? null;
 
-      // When user changes (e.g. User A -> User B or User A -> logged out), wipe query cache
-      if (currentUserIdRef.current !== null && currentUserIdRef.current !== nextUserId) {
+      // When user changes (e.g. User A -> User B or null -> User B), wipe query cache
+      if (currentUserIdRef.current !== nextUserId) {
         queryClient.clear();
       }
       currentUserIdRef.current = nextUserId;

@@ -31,11 +31,11 @@ export function GitHubPage() {
   const integrationsLoading = useQueryInitialLoading(authLoading, integrationsPending, integrationsFetchStatus);
   const pageLoading = reposLoading || integrationsLoading;
 
-  const handleConnect = () => {
+  const handleConnect = async () => {
     try {
       setError(null);
       setSyncSuccessMessage(null);
-      githubService.initiateOAuth();
+      await githubService.initiateOAuth();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to initiate GitHub connection');
     }
@@ -200,9 +200,30 @@ export function GitHubPage() {
       )}
 
       {error && (
-        <Card className="p-4 border-rose-200 bg-rose-50 text-rose-700 flex items-center gap-3">
-          <XCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
-          <p className="text-sm font-medium">{error}</p>
+        <Card className="p-4 border-rose-200 bg-rose-50 text-rose-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <XCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
+            <p className="text-sm font-medium">{error}</p>
+          </div>
+          {error.toLowerCase().includes('switch') || error.toLowerCase().includes('already connected') ? (
+            <div className="flex items-center gap-2 self-start sm:self-center">
+              <a
+                href="https://github.com/logout"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg text-rose-700 bg-rose-100 hover:bg-rose-200 whitespace-nowrap transition-colors"
+              >
+                1. Sign out on GitHub.com
+              </a>
+              <button
+                onClick={handleConnect}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-rose-600 text-white hover:bg-rose-700 whitespace-nowrap transition-colors"
+              >
+                <Github className="w-3.5 h-3.5" />
+                2. Connect GitHub
+              </button>
+            </div>
+          ) : null}
         </Card>
       )}
 
@@ -232,6 +253,9 @@ export function GitHubPage() {
             actionLabel={config.isGitHubClientConfigured ? 'Connect GitHub' : undefined}
             onAction={config.isGitHubClientConfigured ? handleConnect : undefined}
           />
+          <p className="mt-4 text-center text-xs text-slate-500">
+            DevOS connects to the active GitHub session in your browser. Ensure you are signed into your intended GitHub account on github.com before connecting.
+          </p>
         </Card>
       ) : (
         <div className="space-y-6">
@@ -403,12 +427,8 @@ export function GitHubPage() {
                           )}
                         </div>
 
-                        <div className="min-w-[220px] space-y-4">
-                          <div className="rounded-[24px] border border-[#E5D5FF] bg-[#E8F4FF] p-4 text-sm text-[#2F1F5E] shadow-sm">
-                            <div className="font-semibold mb-2">Repository summary</div>
-                            <p>{getRepositorySummary(repo)}</p>
-                          </div>
-                          <div className="flex gap-3 flex-col sm:flex-row">
+                        <div className="min-w-[200px] flex flex-col justify-center gap-3">
+                          <div className="flex gap-2 flex-col sm:flex-row">
                             <Button variant="secondary" onClick={() => copyRepositoryUrl(repo.html_url)} className="flex-1">
                               <Clipboard className="w-4 h-4 mr-2" />
                               Copy URL
@@ -417,13 +437,13 @@ export function GitHubPage() {
                               href={repo.html_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="inline-flex flex-1 items-center justify-center rounded-[24px] border border-[#D9C5FF] bg-white px-4 py-3 text-sm font-semibold text-[#321F73] shadow-sm transition hover:bg-[#F6F1FF]"
+                              className="inline-flex flex-1 items-center justify-center rounded-[24px] border border-[#D9C5FF] bg-white px-4 py-2.5 text-sm font-semibold text-[#321F73] shadow-sm transition hover:bg-[#F6F1FF]"
                             >
                               <ExternalLink className="w-4 h-4 mr-2" />
                               Open
                             </a>
                           </div>
-                          {copyMessage && <div className="text-sm text-[#065F46]">{copyMessage}</div>}
+                          {copyMessage && <div className="text-xs text-[#065F46] font-medium text-center">{copyMessage}</div>}
                         </div>
                       </div>
                     </Card>

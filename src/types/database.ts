@@ -275,6 +275,70 @@ export interface Database {
           updated_at?: string;
         };
       };
+      ideas: {
+        Row: {
+          id: string;
+          user_id: string;
+          title: string;
+          description: string | null;
+          category: string;
+          tags: string[] | null;
+          status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          title: string;
+          description?: string | null;
+          category?: string;
+          tags?: string[] | null;
+          status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          title?: string;
+          description?: string | null;
+          category?: string;
+          tags?: string[] | null;
+          status?: string;
+          updated_at?: string;
+        };
+      };
+      ai_history: {
+        Row: {
+          id: string;
+          user_id: string;
+          project_id: string | null;
+          type: string;
+          input: string;
+          output: string;
+          model: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          project_id?: string | null;
+          type: string;
+          input: string;
+          output: string;
+          model: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          project_id?: string | null;
+          type?: string;
+          input?: string;
+          output?: string;
+          model?: string;
+          created_at?: string;
+        };
+      };
     };
   };
 }
